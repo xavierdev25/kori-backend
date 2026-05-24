@@ -17,11 +17,7 @@ import { sanitizePlainText } from '../../common/utils/text-sanitize.util';
 import { StorageService } from '../storage/storage.service';
 import { CreateDrawingNoteDto } from './dto/create-drawing-note.dto';
 import { CreateTextNoteDto } from './dto/create-text-note.dto';
-import {
-  AdminNoteRecord,
-  NotesRepository,
-  PublicNoteRecord,
-} from './notes.repository';
+import { NotesRepository, PublicNoteRecord } from './notes.repository';
 
 export interface RequestFingerprint {
   ip?: string;
@@ -43,7 +39,7 @@ export class NotesService {
   async createTextNote(
     dto: CreateTextNoteDto,
     fingerprint: RequestFingerprint = {},
-  ): Promise<AdminNoteRecord> {
+  ): Promise<PublicNoteRecord> {
     const recipientName = this.sanitizeRequiredText(
       dto.recipientName,
       'recipientName',
@@ -72,7 +68,7 @@ export class NotesService {
     dto: CreateDrawingNoteDto,
     file: Express.Multer.File | undefined,
     fingerprint: RequestFingerprint = {},
-  ): Promise<AdminNoteRecord> {
+  ): Promise<PublicNoteRecord> {
     const recipientName = this.sanitizeRequiredText(
       dto.recipientName,
       'recipientName',

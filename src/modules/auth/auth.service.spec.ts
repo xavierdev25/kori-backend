@@ -6,11 +6,13 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
+  const validPassword = 'admin-password-for-test';
+
   let jwtService: jest.Mocked<Pick<JwtService, 'signAsync'>>;
   let service: AuthService;
 
   beforeEach(() => {
-    const passwordHash = bcrypt.hashSync('diciembre2026', 10);
+    const passwordHash = bcrypt.hashSync(validPassword, 10);
     const configService = {
       get: jest.fn((key: string) => {
         const values: Record<string, string> = {
@@ -37,7 +39,7 @@ describe('AuthService', () => {
     await expect(
       service.login({
         username: 'kori',
-        password: 'diciembre2026',
+        password: validPassword,
       }),
     ).resolves.toEqual({
       accessToken: 'access-token',
@@ -58,7 +60,7 @@ describe('AuthService', () => {
     await expect(
       service.login({
         username: 'otro',
-        password: 'diciembre2026',
+        password: validPassword,
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });

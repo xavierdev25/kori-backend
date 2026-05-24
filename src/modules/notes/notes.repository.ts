@@ -76,23 +76,23 @@ export interface NotesStats {
 export class NotesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  createTextNote(data: CreateTextNoteRecord): Promise<AdminNoteRecord> {
+  createTextNote(data: CreateTextNoteRecord): Promise<PublicNoteRecord> {
     return this.prisma.note.create({
       data: {
         ...data,
         type: NoteType.TEXT,
       },
-      select: adminNoteSelect,
+      select: publicNoteSelect,
     });
   }
 
-  createDrawingNote(data: CreateDrawingNoteRecord): Promise<AdminNoteRecord> {
+  createDrawingNote(data: CreateDrawingNoteRecord): Promise<PublicNoteRecord> {
     return this.prisma.note.create({
       data: {
         ...data,
         type: NoteType.DRAWING,
       },
-      select: adminNoteSelect,
+      select: publicNoteSelect,
     });
   }
 

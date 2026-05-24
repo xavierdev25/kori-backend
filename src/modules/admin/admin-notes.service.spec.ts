@@ -76,6 +76,7 @@ describe('AdminNotesService', () => {
       id: 'note-id',
     });
     expect(repository.deleteNoteById).toHaveBeenCalledWith('note-id');
+    expect(storageService.deleteFile).not.toHaveBeenCalled();
   });
 
   it('deleteNote deletes associated storage file when storagePath exists', async () => {

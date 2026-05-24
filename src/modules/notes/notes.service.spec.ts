@@ -39,7 +39,6 @@ describe('NotesService', () => {
       recipientName: 'Kori',
       message: 'hola',
       imageUrl: null,
-      storagePath: null,
       color: 'yellow',
       rotation: 0,
       positionX: 0,
@@ -60,6 +59,9 @@ describe('NotesService', () => {
     );
 
     expect(note.type).toBe(NoteType.TEXT);
+    expect(note).not.toHaveProperty('ipHash');
+    expect(note).not.toHaveProperty('userAgentHash');
+    expect(note).not.toHaveProperty('storagePath');
     const createPayload = repository.createTextNote.mock.calls[0]?.[0];
 
     expect(createPayload).toMatchObject({
@@ -92,7 +94,6 @@ describe('NotesService', () => {
       recipientName: 'Kori',
       message: null,
       imageUrl: 'https://example.com/drawing.png',
-      storagePath: 'drawings/file.png',
       color: null,
       rotation: 0,
       positionX: 0,
@@ -110,6 +111,9 @@ describe('NotesService', () => {
 
     expect(storageService.uploadDrawing).toHaveBeenCalledWith(file);
     expect(note.type).toBe(NoteType.DRAWING);
+    expect(note).not.toHaveProperty('ipHash');
+    expect(note).not.toHaveProperty('userAgentHash');
+    expect(note).not.toHaveProperty('storagePath');
     expect(repository.createDrawingNote).toHaveBeenCalledWith(
       expect.objectContaining({
         recipientName: 'Kori',

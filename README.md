@@ -12,10 +12,10 @@ Backend NestJS para el muro publico y dashboard privado de Kori.
 ## Configuracion
 
 1. Crea `.env` tomando como base `.env.example`.
-2. Genera el hash bcrypt para la contrasena funcional `diciembre2026`:
+2. Genera el hash bcrypt para la contrasena admin definida por tu entorno:
 
 ```bash
-node -e "const bcrypt = require('bcrypt'); bcrypt.hash('diciembre2026', 12).then(console.log)"
+node -e "const bcrypt = require('bcrypt'); bcrypt.hash('<ADMIN_PASSWORD>', 12).then(console.log)"
 ```
 
 3. Usa el resultado en `ADMIN_PASSWORD_HASH`.
@@ -87,26 +87,26 @@ Login admin:
 ```bash
 curl -X POST http://localhost:4000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"kori","password":"diciembre2026"}'
+  -d '{"username":"<ADMIN_USERNAME>","password":"<ADMIN_PASSWORD>"}'
 ```
 
 Listar notas admin:
 
 ```bash
 curl http://localhost:4000/admin/notes \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
 Stats:
 
 ```bash
 curl http://localhost:4000/admin/notes/stats \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
 Borrar nota:
 
 ```bash
 curl -X DELETE http://localhost:4000/admin/notes/<id> \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
