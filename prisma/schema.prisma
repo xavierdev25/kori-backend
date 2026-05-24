@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Note {
+  id            String   @id @default(uuid())
+  type          NoteType
+
+  recipientName String   @map("recipient_name")
+  message       String?
+  imageUrl      String?  @map("image_url")
+  storagePath   String?  @map("storage_path")
+
+  color         String?
+  rotation      Int
+  positionX     Int      @map("position_x")
+  positionY     Int      @map("position_y")
+  zIndex        Int      @map("z_index")
+
+  ipHash        String?  @map("ip_hash")
+  userAgentHash String?  @map("user_agent_hash")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([type, createdAt])
+  @@map("notes")
+}
+
+enum NoteType {
+  TEXT
+  DRAWING
+}
