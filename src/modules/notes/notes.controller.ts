@@ -20,6 +20,7 @@ import {
   ALLOWED_DRAWING_MIME_TYPES,
   MAX_DRAWING_FILE_SIZE_BYTES,
 } from '../../common/constants/note.constants';
+import { PublicNotesCacheInterceptor } from '../../common/interceptors/public-notes-cache.interceptor';
 import { CreateDrawingNoteDto } from './dto/create-drawing-note.dto';
 import { CreateTextNoteDto } from './dto/create-text-note.dto';
 import { NotesService } from './notes.service';
@@ -44,6 +45,11 @@ export class NotesController {
       storage: memoryStorage(),
       limits: {
         fileSize: MAX_DRAWING_FILE_SIZE_BYTES,
+        files: 1,
+        fields: 5,
+        fieldNameSize: 100,
+        fieldSize: 1024,
+        parts: 6,
       },
       fileFilter: (_request, file, callback) => {
         if (
@@ -74,6 +80,7 @@ export class NotesController {
   }
 
   @Get('public')
+  @UseInterceptors(PublicNotesCacheInterceptor)
   findPublicNotes(
     @Query('limit', new DefaultValuePipe(200), ParseIntPipe) limit: number,
   ) {

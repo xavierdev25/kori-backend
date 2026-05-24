@@ -1,112 +1,321 @@
 # kori-backend
 
-Backend NestJS para el muro publico y dashboard privado de Kori.
+NestJS backend for Kori — a digital sticky-note board where visitors leave text notes and drawings, with an admin dashboard for moderation.
 
-## Requisitos
+---
 
-- Node.js compatible con NestJS 11
-- pnpm
-- PostgreSQL en Supabase
-- Supabase Storage con un bucket publico llamado `notes`
+## Stack
 
-## Configuracion
+| Layer | Technology |
+|---|---|
+| Runtime | Node.js 22 / TypeScript |
+| Framework | NestJS 11 |
+| ORM | Prisma 6.19.3 |
+| Database | PostgreSQL via Supabase Session Pooler |
+| Storage | Supabase Storage |
+| Auth | JWT (HS256, issuer + audience validated) |
+| Container | Docker multi-stage (node:22-slim) |
+| Package manager | pnpm 10 |
 
-1. Crea `.env` tomando como base `.env.example`.
-2. Genera el hash bcrypt para la contrasena admin definida por tu entorno:
+---
 
-```bash
-node -e "const bcrypt = require('bcrypt'); bcrypt.hash('<ADMIN_PASSWORD>', 12).then(console.log)"
+## Architecture
+
+```
+src/
+├── config/
+│   └── env.validation.ts        # Fail-fast env validation at startup
+├── common/
+│   ├── constants/               # Note field limits, style ranges
+│   ├── filters/
+│   │   └── http-exception.filter.ts   # Global error envelope
+│   ├── interceptors/
+│   │   ├── request-logging.interceptor.ts
+│   │   ├── public-notes-cache.interceptor.ts   # ETag + Cache-Control
+│   │   └── no-cache.interceptor.ts
+│   ├── middleware/
+│   │   └── request-id.middleware.ts   # x-request-id propagation
+│   └── utils/
+│       ├── hash.util.ts         # HMAC-SHA256 fingerprinting
+│       ├── client-ip.util.ts    # Trust-proxy-aware IP extraction
+│       ├── random-note-style.util.ts
+│       └── text-sanitize.util.ts
+└── modules/
+    ├── admin/     # GET|DELETE /admin/notes (JWT-protected)
+    ├── auth/      # POST /auth/login
+    ├── health/    # GET /health, /health/liveness, /health/readiness
+    ├── notes/     # POST /notes/text|drawing, GET /notes/public
+    ├── prisma/    # PrismaService (global)
+    └── storage/   # Supabase Storage
 ```
 
-3. Usa el resultado en `ADMIN_PASSWORD_HASH`.
-4. Define `JWT_SECRET` con un valor fuerte de al menos 32 caracteres.
-5. Configura `LANDING_ORIGIN` y `DASHBOARD_ORIGIN` con los dominios reales permitidos.
+---
 
-## Prisma
+## Environment variables
+
+Copy `.env.example` to `.env` and fill in all values before starting.
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | yes | Supabase Session Pooler URL (pgbouncer mode) |
+| `DIRECT_URL` | yes | Direct PostgreSQL URL (for Prisma Migrate) |
+| `SUPABASE_URL` | yes | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase service_role key (backend-only) |
+| `SUPABASE_STORAGE_BUCKET` | yes | Storage bucket name (default: `notes`) |
+| `ADMIN_USERNAME` | yes | Dashboard admin username |
+| `ADMIN_PASSWORD_HASH` | yes | bcrypt hash of admin password ($2b$ format) |
+| `JWT_SECRET` | yes | HMAC secret — minimum 32 characters |
+| `JWT_EXPIRES_IN` | yes | Token TTL (e.g. `2h`) |
+| `JWT_ISSUER` | yes | JWT `iss` claim (e.g. `kori-backend`) |
+| `JWT_AUDIENCE` | yes | JWT `aud` claim (e.g. `kori-dashboard`) |
+| `HASH_PEPPER` | yes | HMAC pepper for IP/UA fingerprints — minimum 32 characters |
+| `LANDING_ORIGIN` | yes | Allowed CORS origin for landing page |
+| `DASHBOARD_ORIGIN` | yes | Allowed CORS origin for admin dashboard |
+| `PORT` | yes | HTTP port (default: `4000`) |
+| `NODE_ENV` | yes | `development` / `test` / `production` |
+| `ENABLE_REQUEST_LOGGING` | no | Set `true` to log structured HTTP requests |
+| `TRUST_PROXY` | no | Proxy hops to trust (`1` for Cloudflare) |
+
+**Generating secrets:**
+```bash
+# JWT_SECRET / HASH_PEPPER
+openssl rand -base64 48
+
+# ADMIN_PASSWORD_HASH
+node -e "const b=require('bcrypt');console.log(b.hashSync('your-password',12))"
+```
+
+---
+
+## Supabase setup
+
+### PostgreSQL (Session Pooler)
+
+1. Create a Supabase project.
+2. In **Settings > Database > Connection pooling**, enable Session Mode.
+3. Copy the connection string into `DATABASE_URL` (add `?pgbouncer=true&connection_limit=1`).
+4. Copy the direct connection string into `DIRECT_URL`.
+
+### Storage
+
+1. In **Storage**, create a bucket named `notes`.
+2. Set the bucket to **public** (drawing image URLs are served directly to the landing page).
+3. Only the backend accesses storage via the `service_role` key — never expose this key client-side.
+
+---
+
+## Commands
 
 ```bash
+# Install dependencies
 pnpm install
-pnpm run prisma:generate
-pnpm run prisma:migrate:deploy
-```
 
-Para desarrollo local con una base de datos descartable:
+# Generate Prisma client (required after schema changes or clean install)
+pnpm exec prisma generate
 
-```bash
-pnpm run prisma:migrate:dev
-```
+# Apply database migrations
+pnpm exec prisma migrate deploy
 
-## Ejecutar
-
-```bash
+# Start development server (watch mode)
 pnpm run start:dev
-```
 
-El servicio escucha en `PORT`, por defecto `4000`.
-
-## Tests
-
-```bash
-pnpm run test
-pnpm run test:e2e
+# Build for production
 pnpm run build
+
+# Start production build
+pnpm run start:prod
+
+# Lint (auto-fix)
+pnpm run lint
+
+# Lint (CI — no auto-fix, max-warnings 0)
+pnpm run lint:check
+
+# Unit tests
+pnpm run test
+
+# Unit tests with coverage
+pnpm run test:cov
+
+# E2E tests
+pnpm run test:e2e
 ```
 
-## Probar endpoints
+---
 
-Health:
+## Docker
 
 ```bash
-curl http://localhost:4000/health
+# Build production image
+docker build -t kori-backend:local .
+
+# Build migrator image (runs prisma migrate deploy)
+docker build --target migrator -t kori-backend:migrator .
+
+# Run production container
+docker run --rm --env-file .env -p 4000:4000 kori-backend:local
+
+# Run migrator (applies pending migrations then exits)
+docker run --rm --env-file .env kori-backend:migrator
+
+# Docker Compose (production-like)
+docker compose up --build
 ```
 
-Crear nota de texto:
+---
 
+## Endpoints
+
+### Public
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/notes/public` | Returns the latest notes (max 200) |
+| `POST` | `/notes/text` | Creates a text note |
+| `POST` | `/notes/drawing` | Creates a drawing note (multipart/form-data) |
+
+Rate limits: `/notes/text` 5 req/60s · `/notes/drawing` 3 req/60s
+
+### Auth
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/auth/login` | Returns JWT access token |
+
+Rate limit: 5 req/60s · Response always includes `Cache-Control: no-store`
+
+### Admin (JWT required)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/admin/notes` | Paginated note list with storagePath |
+| `GET` | `/admin/notes/stats` | Total/text/drawing counts |
+| `GET` | `/admin/notes/:id` | Single note detail |
+| `DELETE` | `/admin/notes/:id` | Delete note + storage file if DRAWING |
+
+All admin responses include `Cache-Control: no-store`.
+
+### Health
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Process alive check |
+| `GET` | `/health/liveness` | Liveness probe (no external deps) |
+| `GET` | `/health/readiness` | Readiness probe (validates DB with SELECT 1) |
+
+Health endpoints are exempt from rate limiting.
+
+---
+
+## Error response format
+
+All errors return a uniform JSON envelope:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "message cannot exceed 256 characters",
+    "requestId": "550e8400-e29b-41d4-a716-446655440000",
+    "timestamp": "2026-05-24T10:00:00.000Z",
+    "path": "/notes/text",
+    "method": "POST"
+  }
+}
+```
+
+Error codes: `VALIDATION_ERROR` · `UNAUTHORIZED` · `FORBIDDEN` · `NOT_FOUND` · `RATE_LIMITED` · `SERVICE_UNAVAILABLE` · `INTERNAL_ERROR` · `REQUEST_ERROR`
+
+Stack traces are never exposed. `requestId` is included in every error for correlation.
+
+---
+
+## Rate limiting
+
+| Endpoint | Limit |
+|---|---|
+| `POST /auth/login` | 5 requests / 60s |
+| `POST /notes/text` | 5 requests / 60s |
+| `POST /notes/drawing` | 3 requests / 60s |
+| `GET /notes/public` | 60 requests / 60s (global) |
+| `/admin/*` | 60 requests / 60s (global) |
+| `/health/*` | No limit |
+
+Rate-limited requests receive HTTP 429 with `RATE_LIMITED` error code.
+
+---
+
+## Caching
+
+### `GET /notes/public`
+- `Cache-Control: public, max-age=30, stale-while-revalidate=60`
+- ETag computed from response body (SHA-256 prefix, first 16 hex chars)
+- Returns `304 Not Modified` when `If-None-Match` matches
+
+**Cloudflare configuration:**
+- Cache Rule: `GET /notes/public` → Cache Everything, Edge TTL 1 minute
+- Auth/Admin routes: `Cache-Control: no-store` → Cloudflare bypasses cache automatically
+
+### Auth + Admin
+All responses include `Cache-Control: no-store`.
+
+---
+
+## Security
+
+- **Env validation**: fail-fast at startup if required variables are missing or malformed
+- **Helmet**: security headers on all responses
+- **CORS**: explicit origin allowlist (`LANDING_ORIGIN`, `DASHBOARD_ORIGIN`)
+- **JWT**: HS256 with issuer + audience validation; tokens expire per `JWT_EXPIRES_IN`
+- **Fingerprinting**: HMAC-SHA256 with `HASH_PEPPER` — raw IP/UA is never stored in DB
+- **Trust proxy**: configurable via `TRUST_PROXY` for correct client IP behind Cloudflare
+- **File validation**: MIME type + magic bytes checked for drawing uploads
+- **Multer limits**: fileSize 2 MB, 1 file, 5 fields, 6 parts
+- **Input sanitization**: HTML stripped from all text fields via `sanitize-html`
+- **Error filter**: stack traces never exposed; sensitive env values never logged
+- **x-request-id**: propagated from caller or generated per request (UUID v4)
+
+---
+
+## Database migrations
+
+| Migration | Description |
+|---|---|
+| `20260524000000_init_notes` | Initial schema: `notes` table, `NoteType` enum, indexes |
+| `20260524100000_add_note_constraints` | CHECK constraints for type invariants, position ranges, z-index, non-empty recipient_name |
+
+To apply pending migrations:
 ```bash
-curl -X POST http://localhost:4000/notes/text \
-  -H "Content-Type: application/json" \
-  -d '{"recipientName":"Kori","message":"Mensaje desde el inconsciente"}'
+pnpm exec prisma migrate deploy
+# or via Docker migrator:
+docker run --rm --env-file .env kori-backend:migrator
 ```
 
-Listar muro publico:
+---
 
-```bash
-curl http://localhost:4000/notes/public
-```
+## CI/CD
 
-Crear nota de dibujo:
+GitHub Actions pipeline at `.github/workflows/ci.yml`:
 
-```bash
-curl -X POST http://localhost:4000/notes/drawing \
-  -F "recipientName=Kori" \
-  -F "file=@./drawing.png;type=image/png"
-```
+1. **quality** job: install → prisma generate → lint:check → test → test:e2e → build → pnpm audit
+2. **docker** job (after quality): build production image → build migrator image → Trivy security scan
 
-Login admin:
+No secrets are used in the workflow. Deployment is not automated.
 
-```bash
-curl -X POST http://localhost:4000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"<ADMIN_USERNAME>","password":"<ADMIN_PASSWORD>"}'
-```
+**Future roadmap:** BullMQ/Redis queue for async drawing uploads, and a notification service layer are designed for but not implemented. The current service architecture (StorageService injected into NotesService) supports this refactor without breaking existing endpoints.
 
-Listar notas admin:
+---
 
-```bash
-curl http://localhost:4000/admin/notes \
-  -H "Authorization: Bearer <ACCESS_TOKEN>"
-```
+## Troubleshooting
 
-Stats:
-
-```bash
-curl http://localhost:4000/admin/notes/stats \
-  -H "Authorization: Bearer <ACCESS_TOKEN>"
-```
-
-Borrar nota:
-
-```bash
-curl -X DELETE http://localhost:4000/admin/notes/<id> \
-  -H "Authorization: Bearer <ACCESS_TOKEN>"
-```
+| Problem | Cause | Fix |
+|---|---|---|
+| `EADDRINUSE: address already in use :::4000` | Port 4000 occupied | `lsof -ti:4000 \| xargs kill` or change `PORT` |
+| `P1001: Can't reach database server` | DATABASE_URL unreachable | Check Supabase Session Pooler status and URL |
+| `P1000: Authentication failed` | Wrong DB password | Regenerate password in Supabase dashboard |
+| `Invalid Compact JWS` | SUPABASE_SERVICE_ROLE_KEY wrong/empty | Copy the full service_role key from Supabase API settings |
+| `Bucket "notes" not found` | Bucket missing or wrong name | Create bucket in Supabase Storage matching `SUPABASE_STORAGE_BUCKET` |
+| `Environment validation failed` | Missing or malformed env var | Check `.env` against `.env.example`; run `pnpm run start:dev` to see which variable failed |
+| CORS errors in browser | Origin not in allowlist | Add origin to `LANDING_ORIGIN` or `DASHBOARD_ORIGIN` |
+| 401 on admin routes | JWT expired or wrong issuer/audience | Verify `JWT_ISSUER` and `JWT_AUDIENCE` match between backend and dashboard config |

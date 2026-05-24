@@ -1,0 +1,34 @@
+services:
+  kori-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kori-backend:local
+    env_file:
+      - path: .env
+        required: true
+        format: raw
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:' + (process.env.PORT || 4000) + '/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 3s
+      start_period: 20s
+      retries: 3

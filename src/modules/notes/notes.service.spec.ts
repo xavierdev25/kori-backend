@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NoteType } from '@prisma/client';
 
 import { StorageService } from '../storage/storage.service';
@@ -7,6 +8,7 @@ import { NotesService } from './notes.service';
 
 describe('NotesService', () => {
   const createdAt = new Date('2026-05-24T00:00:00.000Z');
+  const testPepper = 'test-pepper-with-at-least-32-chars-here';
 
   let repository: jest.Mocked<
     Pick<
@@ -15,6 +17,7 @@ describe('NotesService', () => {
     >
   >;
   let storageService: jest.Mocked<Pick<StorageService, 'uploadDrawing'>>;
+  let configService: jest.Mocked<Pick<ConfigService, 'get'>>;
   let service: NotesService;
 
   beforeEach(() => {
@@ -26,9 +29,13 @@ describe('NotesService', () => {
     storageService = {
       uploadDrawing: jest.fn(),
     };
+    configService = {
+      get: jest.fn().mockReturnValue(testPepper),
+    };
     service = new NotesService(
       repository as unknown as NotesRepository,
       storageService as unknown as StorageService,
+      configService as unknown as ConfigService,
     );
   });
 
@@ -81,6 +88,76 @@ describe('NotesService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('createTextNote rejects message exceeding max length', async () => {
+    await expect(
+      service.createTextNote({
+        recipientName: 'Kori',
+        message: 'a'.repeat(257),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('createTextNote rejects recipientName exceeding max length', async () => {
+    await expect(
+      service.createTextNote({
+        recipientName: 'a'.repeat(41),
+        message: 'hola',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('createTextNote uses HMAC fingerprint hashes', async () => {
+    repository.createTextNote.mockResolvedValue({
+      id: 'note-id',
+      type: NoteType.TEXT,
+      recipientName: 'Kori',
+      message: 'hola',
+      imageUrl: null,
+      color: 'yellow',
+      rotation: 0,
+      positionX: 0,
+      positionY: 0,
+      zIndex: 1,
+      createdAt,
+    });
+
+    await service.createTextNote(
+      { recipientName: 'Kori', message: 'hola' },
+      { ip: '1.2.3.4', userAgent: 'agent' },
+    );
+
+    const payload = repository.createTextNote.mock.calls[0]?.[0];
+
+    // HMAC produces 64-char hex string
+    expect(payload?.ipHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(payload?.userAgentHash).toMatch(/^[0-9a-f]{64}$/);
+    // Must NOT be raw ip
+    expect(payload?.ipHash).not.toBe('1.2.3.4');
+  });
+
+  it('createTextNote fingerprint hashes are null when no ip/userAgent', async () => {
+    repository.createTextNote.mockResolvedValue({
+      id: 'note-id',
+      type: NoteType.TEXT,
+      recipientName: 'Kori',
+      message: 'hola',
+      imageUrl: null,
+      color: 'yellow',
+      rotation: 0,
+      positionX: 0,
+      positionY: 0,
+      zIndex: 1,
+      createdAt,
+    });
+
+    await service.createTextNote({ recipientName: 'Kori', message: 'hola' });
+
+    const payload = repository.createTextNote.mock.calls[0]?.[0];
+
+    expect(payload?.ipHash).toBeNull();
+    expect(payload?.userAgentHash).toBeNull();
+  });
+
   it('createDrawingNote uploads the file and creates a DRAWING note', async () => {
     const file = createPngFile();
 
@@ -121,6 +198,46 @@ describe('NotesService', () => {
         storagePath: 'drawings/file.png',
       }),
     );
+  });
+
+  it('createDrawingNote rejects missing file', async () => {
+    await expect(
+      service.createDrawingNote({ recipientName: 'Kori' }, undefined),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('createDrawingNote rejects file exceeding 2MB', async () => {
+    const bigFile: Express.Multer.File = {
+      ...createPngFile(),
+      size: 3 * 1024 * 1024,
+      buffer: Buffer.alloc(3 * 1024 * 1024),
+    };
+
+    await expect(
+      service.createDrawingNote({ recipientName: 'Kori' }, bigFile),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('createDrawingNote rejects invalid MIME type', async () => {
+    const file: Express.Multer.File = {
+      ...createPngFile(),
+      mimetype: 'application/pdf',
+    };
+
+    await expect(
+      service.createDrawingNote({ recipientName: 'Kori' }, file),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('createDrawingNote rejects file with invalid magic bytes', async () => {
+    const file: Express.Multer.File = {
+      ...createPngFile(),
+      buffer: Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]),
+    };
+
+    await expect(
+      service.createDrawingNote({ recipientName: 'Kori' }, file),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('findPublicNotes returns only public fields from repository mapper', async () => {

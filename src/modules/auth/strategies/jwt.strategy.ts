@@ -6,6 +6,8 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 export interface JwtPayload {
   sub: string;
   username: string;
+  iss?: string;
+  aud?: string | string[];
   iat?: number;
   exp?: number;
 }
@@ -22,6 +24,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: configService.getOrThrow<string>('JWT_SECRET'),
+      issuer: configService.getOrThrow<string>('JWT_ISSUER'),
+      audience: configService.getOrThrow<string>('JWT_AUDIENCE'),
     });
   }
 

@@ -24,6 +24,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
           signOptions: {
             expiresIn: (configService.get<string>('JWT_EXPIRES_IN') ??
               '2h') as JwtExpiresIn,
+            issuer: configService.getOrThrow<string>('JWT_ISSUER'),
+            audience: configService.getOrThrow<string>('JWT_AUDIENCE'),
           },
         };
       },

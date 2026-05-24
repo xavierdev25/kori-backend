@@ -6,14 +6,17 @@ import {
   ParseUUIDPipe,
   Query,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 
+import { NoCacheInterceptor } from '../../common/interceptors/no-cache.interceptor';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminNotesService } from './admin-notes.service';
 import { AdminNotesQueryDto } from './dto/admin-notes-query.dto';
 
 @Controller('admin/notes')
 @UseGuards(JwtAuthGuard)
+@UseInterceptors(NoCacheInterceptor)
 export class AdminNotesController {
   constructor(private readonly adminNotesService: AdminNotesService) {}
 

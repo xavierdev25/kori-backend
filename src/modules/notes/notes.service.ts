@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import {
   ALLOWED_DRAWING_MIME_TYPES,
@@ -8,7 +9,7 @@ import {
   PUBLIC_NOTES_DEFAULT_LIMIT,
   PUBLIC_NOTES_MAX_LIMIT,
 } from '../../common/constants/note.constants';
-import { sha256OrNull } from '../../common/utils/hash.util';
+import { hmacSha256OrNull } from '../../common/utils/hash.util';
 import {
   randomBaseNoteStyle,
   randomTextNoteStyle,
@@ -34,6 +35,7 @@ export class NotesService {
   constructor(
     private readonly notesRepository: NotesRepository,
     private readonly storageService: StorageService,
+    private readonly configService: ConfigService,
   ) {}
 
   async createTextNote(
@@ -129,9 +131,11 @@ export class NotesService {
   private createFingerprintHashes(
     fingerprint: RequestFingerprint,
   ): FingerprintHashes {
+    const pepper = this.configService.get<string>('HASH_PEPPER') ?? null;
+
     return {
-      ipHash: sha256OrNull(fingerprint.ip),
-      userAgentHash: sha256OrNull(fingerprint.userAgent),
+      ipHash: hmacSha256OrNull(fingerprint.ip, pepper),
+      userAgentHash: hmacSha256OrNull(fingerprint.userAgent, pepper),
     };
   }
 

@@ -1,0 +1,51 @@
+# Dependencies and build output
+node_modules
+dist
+build
+coverage
+.nyc_output
+
+# Git and CI metadata
+.git
+.gitignore
+.github
+
+# Environment and secrets
+.env
+.env.*
+
+# Logs and debug files
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Tests and local validation artifacts
+test
+**/*.spec.ts
+test-drawing.png
+
+# Editor and local agent metadata
+.vscode
+.idea
+.agents
+.codex
+.claude
+
+# OS and temporary files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.temp
+.tmp
+tmp
+temp
+
+# Docker and docs not needed inside the build context
+Dockerfile
+docker-compose.yml
+README.md
