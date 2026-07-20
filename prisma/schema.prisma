@@ -9,8 +9,9 @@ datasource db {
 }
 
 model Note {
-  id            String   @id @default(uuid())
+  id            String     @id @default(uuid())
   type          NoteType
+  status        NoteStatus @default(PENDING)
 
   recipientName String   @map("recipient_name")
   message       String?
@@ -30,10 +31,38 @@ model Note {
 
   @@index([createdAt])
   @@index([type, createdAt])
+  @@index([status, createdAt])
   @@map("notes")
 }
 
 enum NoteType {
   TEXT
   DRAWING
+}
+
+/// Pre-moderación: las notas nacen PENDING y solo las APPROVED
+/// aparecen en el muro público.
+enum NoteStatus {
+  PENDING
+  APPROVED
+}
+
+/// Correos capturados por el "Coming soon" de la landing.
+model Subscriber {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  ipHash    String?  @map("ip_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("subscribers")
+}
+
+/// Ajustes editables desde el dashboard (contador, link del álbum…).
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
 }

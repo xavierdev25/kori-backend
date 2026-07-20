@@ -7,6 +7,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import * as Sentry from '@sentry/node';
 import type { Request, Response } from 'express';
 
 export interface ErrorEnvelope {
@@ -48,6 +49,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       this.logger.error(
         `[${requestId}] ${req.method} ${req.path} → ${status}: ${this.toLogMessage(exception)}`,
       );
+      // no-op si Sentry no fue inicializado (sin SENTRY_DSN)
+      Sentry.captureException(exception, {
+        tags: { requestId, path: req.path, method: req.method },
+      });
     }
 
     const envelope: ErrorEnvelope = {

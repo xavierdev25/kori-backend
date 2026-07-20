@@ -319,3 +319,52 @@ No secrets are used in the workflow. Deployment is not automated.
 | `Environment validation failed` | Missing or malformed env var | Check `.env` against `.env.example`; run `pnpm run start:dev` to see which variable failed |
 | CORS errors in browser | Origin not in allowlist | Add origin to `LANDING_ORIGIN` or `DASHBOARD_ORIGIN` |
 | 401 on admin routes | JWT expired or wrong issuer/audience | Verify `JWT_ISSUER` and `JWT_AUDIENCE` match between backend and dashboard config |
+
+---
+
+## Recent additions (July 2026)
+
+### Pre-moderation (`NoteStatus`)
+
+Notes are created as `PENDING` and only `APPROVED` notes are returned by
+`GET /notes/public`. Approve from the dashboard or via:
+
+```
+PATCH /admin/notes/:id/approve   (JWT required)
+```
+
+`GET /admin/notes` accepts `?status=PENDING|APPROVED`. Stats include
+`totalPending`.
+
+### Subscribers (landing "Coming soon")
+
+```
+POST   /subscribers               { email }   → 201 | 409 duplicate (3/min throttle)
+GET    /admin/subscribers?page&limit          (JWT)
+DELETE /admin/subscribers/:id                 (JWT, idempotent)
+```
+
+Emails are normalized to lowercase; the client IP is stored only as an
+HMAC-SHA256 hash (`HASH_PEPPER`).
+
+### App settings (landing countdown / album link)
+
+```
+GET   /settings/public            → { countdownTarget, albumUrl }  (cached 60s)
+GET   /admin/settings             (JWT)
+PATCH /admin/settings             (JWT) { countdownTarget?, albumUrl? }
+```
+
+Empty string deletes a key; `undefined` leaves it untouched. The landing
+countdown becomes a CTA button pointing to `albumUrl` when it reaches zero.
+
+### Local storage driver (development only)
+
+Set `STORAGE_DRIVER=local` to skip Supabase entirely: drawings are written to
+`./uploads` and served at `/uploads/*` with CORP `cross-origin`. Rejected by
+env validation when `NODE_ENV=production`.
+
+### Optional Sentry
+
+Set `SENTRY_DSN` to report 5xx exceptions (free tier is plenty). Without the
+variable, Sentry is a no-op.

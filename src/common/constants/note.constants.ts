@@ -2,8 +2,8 @@ export const NOTE_COLORS = ['yellow', 'pink', 'blue', 'green'] as const;
 
 export type NoteColor = (typeof NOTE_COLORS)[number];
 
-export const MAX_RECIPIENT_NAME_LENGTH = 40;
-export const MAX_MESSAGE_LENGTH = 256;
+export const MAX_RECIPIENT_NAME_LENGTH = 14;
+export const MAX_MESSAGE_LENGTH = 50;
 
 export const MAX_DRAWING_FILE_SIZE_BYTES = 2 * 1024 * 1024;
 

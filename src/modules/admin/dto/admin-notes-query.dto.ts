@@ -1,4 +1,4 @@
-import { NoteType } from '@prisma/client';
+import { NoteStatus, NoteType } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   IsEnum,
@@ -23,6 +23,10 @@ export class AdminNotesQueryDto {
   @IsOptional()
   @IsEnum(NoteType)
   type?: NoteType;
+
+  @IsOptional()
+  @IsEnum(NoteStatus)
+  status?: NoteStatus;
 
   @Transform(trimString)
   @IsOptional()

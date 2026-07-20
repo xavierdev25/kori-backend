@@ -1,3 +1,6 @@
+import { mkdir, unlink, writeFile } from 'fs/promises';
+import { dirname, join } from 'path';
+
 import {
   Injectable,
   InternalServerErrorException,
@@ -18,13 +21,37 @@ export interface StoredFile {
   storagePath: string;
 }
 
+export type StorageDriver = 'supabase' | 'local';
+
+/** Carpeta de subida del driver local (servida como /uploads en main.ts). */
+export const LOCAL_UPLOADS_DIR = 'uploads';
+
 @Injectable()
 export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
-  private readonly supabase: ReturnType<typeof createClient>;
+  private readonly driver: StorageDriver;
+  private readonly supabase: ReturnType<typeof createClient> | null;
   private readonly bucket: string;
+  private readonly localBaseUrl: string;
 
   constructor(private readonly configService: ConfigService) {
+    this.driver =
+      this.configService.get<string>('STORAGE_DRIVER') === 'local'
+        ? 'local'
+        : 'supabase';
+
+    if (this.driver === 'local') {
+      // Modo desarrollo: archivos en disco, sin dependencia de Supabase.
+      const port = this.configService.get<string>('PORT') ?? '4000';
+      this.localBaseUrl =
+        this.configService.get<string>('PUBLIC_BASE_URL') ??
+        `http://localhost:${port}`;
+      this.supabase = null;
+      this.bucket = LOCAL_UPLOADS_DIR;
+      return;
+    }
+
+    this.localBaseUrl = '';
     const supabaseUrl = this.configService.get<string>('SUPABASE_URL');
     const serviceRoleKey = this.configService.get<string>(
       'SUPABASE_SERVICE_ROLE_KEY',
@@ -53,8 +80,18 @@ export class StorageService implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
+    if (this.driver === 'local') {
+      await mkdir(join(process.cwd(), LOCAL_UPLOADS_DIR, 'drawings'), {
+        recursive: true,
+      });
+      this.logger.warn(
+        `Storage driver "local" activo (solo desarrollo). Archivos en ./${LOCAL_UPLOADS_DIR}, servidos desde ${this.localBaseUrl}/uploads`,
+      );
+      return;
+    }
+
     try {
-      const { error } = await this.supabase.storage.getBucket(this.bucket);
+      const { error } = await this.getSupabase().storage.getBucket(this.bucket);
 
       if (error) {
         throw new Error(error.message);
@@ -75,8 +112,12 @@ export class StorageService implements OnModuleInit {
     );
     const storagePath = `drawings/${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${extension}`;
 
-    const { error } = await this.supabase.storage
-      .from(this.bucket)
+    if (this.driver === 'local') {
+      return this.uploadDrawingToDisk(file, storagePath);
+    }
+
+    const { error } = await this.getSupabase()
+      .storage.from(this.bucket)
       .upload(storagePath, file.buffer, {
         contentType: file.mimetype,
         upsert: false,
@@ -89,8 +130,8 @@ export class StorageService implements OnModuleInit {
       throw new InternalServerErrorException('No se pudo subir la imagen');
     }
 
-    const { data } = this.supabase.storage
-      .from(this.bucket)
+    const { data } = this.getSupabase()
+      .storage.from(this.bucket)
       .getPublicUrl(storagePath);
 
     if (!data.publicUrl) {
@@ -106,8 +147,22 @@ export class StorageService implements OnModuleInit {
   }
 
   async deleteFile(storagePath: string): Promise<void> {
-    const { error } = await this.supabase.storage
-      .from(this.bucket)
+    if (this.driver === 'local') {
+      try {
+        await unlink(join(process.cwd(), LOCAL_UPLOADS_DIR, storagePath));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          this.logger.error(`Local delete failed: ${this.toMessage(error)}`);
+          throw new InternalServerErrorException(
+            'No se pudo borrar la imagen asociada',
+          );
+        }
+      }
+      return;
+    }
+
+    const { error } = await this.getSupabase()
+      .storage.from(this.bucket)
       .remove([storagePath]);
 
     if (error) {
@@ -118,6 +173,35 @@ export class StorageService implements OnModuleInit {
         'No se pudo borrar la imagen asociada',
       );
     }
+  }
+
+  private async uploadDrawingToDisk(
+    file: Express.Multer.File,
+    storagePath: string,
+  ): Promise<StoredFile> {
+    try {
+      const absolutePath = join(process.cwd(), LOCAL_UPLOADS_DIR, storagePath);
+      await mkdir(dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, file.buffer);
+
+      return {
+        imageUrl: `${this.localBaseUrl}/uploads/${storagePath}`,
+        storagePath,
+      };
+    } catch (error) {
+      this.logger.error(`Local upload failed: ${this.toMessage(error)}`);
+      throw new InternalServerErrorException('No se pudo subir la imagen');
+    }
+  }
+
+  private getSupabase(): ReturnType<typeof createClient> {
+    if (!this.supabase) {
+      throw new InternalServerErrorException(
+        'Supabase client is not configured',
+      );
+    }
+
+    return this.supabase;
   }
 
   private getExtensionFromMimeType(mimeType: DrawingMimeType): string {

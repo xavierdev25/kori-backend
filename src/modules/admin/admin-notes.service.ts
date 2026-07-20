@@ -36,6 +36,7 @@ export class AdminNotesService {
 
     const result = await this.notesRepository.findAdminNotes({
       type: query.type,
+      status: query.status,
       search: search || undefined,
       page,
       limit,
@@ -60,6 +61,16 @@ export class AdminNotesService {
     }
 
     return note;
+  }
+
+  async approveNote(id: string) {
+    const note = await this.notesRepository.findNoteById(id);
+
+    if (!note) {
+      throw new NotFoundException('Nota no encontrada');
+    }
+
+    return this.notesRepository.approveNoteById(id);
   }
 
   async deleteNote(id: string): Promise<DeleteNoteResponse> {

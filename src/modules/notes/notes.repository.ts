@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Note, NoteType, Prisma } from '@prisma/client';
+import { Note, NoteStatus, NoteType, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -19,6 +19,7 @@ export const publicNoteSelect = {
 
 export const adminNoteSelect = {
   ...publicNoteSelect,
+  status: true,
   storagePath: true,
 } satisfies Prisma.NoteSelect;
 
@@ -56,6 +57,7 @@ export interface CreateDrawingNoteRecord {
 
 export interface AdminNotesListOptions {
   type?: NoteType;
+  status?: NoteStatus;
   search?: string;
   page: number;
   limit: number;
@@ -70,6 +72,7 @@ export interface NotesStats {
   total: number;
   totalText: number;
   totalDrawing: number;
+  totalPending: number;
 }
 
 @Injectable()
@@ -98,6 +101,7 @@ export class NotesRepository {
 
   findPublicNotes(limit: number): Promise<PublicNoteRecord[]> {
     return this.prisma.note.findMany({
+      where: { status: NoteStatus.APPROVED },
       orderBy: {
         createdAt: 'desc',
       },
@@ -147,17 +151,28 @@ export class NotesRepository {
     });
   }
 
+  approveNoteById(id: string): Promise<AdminNoteRecord> {
+    return this.prisma.note.update({
+      where: { id },
+      data: { status: NoteStatus.APPROVED },
+      select: adminNoteSelect,
+    });
+  }
+
   async getStats(): Promise<NotesStats> {
-    const [total, totalText, totalDrawing] = await this.prisma.$transaction([
-      this.prisma.note.count(),
-      this.prisma.note.count({ where: { type: NoteType.TEXT } }),
-      this.prisma.note.count({ where: { type: NoteType.DRAWING } }),
-    ]);
+    const [total, totalText, totalDrawing, totalPending] =
+      await this.prisma.$transaction([
+        this.prisma.note.count(),
+        this.prisma.note.count({ where: { type: NoteType.TEXT } }),
+        this.prisma.note.count({ where: { type: NoteType.DRAWING } }),
+        this.prisma.note.count({ where: { status: NoteStatus.PENDING } }),
+      ]);
 
     return {
       total,
       totalText,
       totalDrawing,
+      totalPending,
     };
   }
 
@@ -168,6 +183,10 @@ export class NotesRepository {
 
     if (options.type) {
       where.type = options.type;
+    }
+
+    if (options.status) {
+      where.status = options.status;
     }
 
     if (options.search) {

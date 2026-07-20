@@ -14,12 +14,24 @@ export function validateEnvironment(
     );
   }
 
+  const storageDriver =
+    (config['STORAGE_DRIVER'] as string | undefined) ?? 'supabase';
+
+  if (!['supabase', 'local'].includes(storageDriver)) {
+    errors.push(
+      `STORAGE_DRIVER must be supabase or local (got: "${storageDriver}")`,
+    );
+  }
+
+  if (isProduction && storageDriver === 'local') {
+    errors.push(
+      'STORAGE_DRIVER=local is a development-only driver and must not be used in production',
+    );
+  }
+
   const requiredStrings: string[] = [
     'DATABASE_URL',
     'DIRECT_URL',
-    'SUPABASE_URL',
-    'SUPABASE_SERVICE_ROLE_KEY',
-    'SUPABASE_STORAGE_BUCKET',
     'ADMIN_USERNAME',
     'ADMIN_PASSWORD_HASH',
     'JWT_SECRET',
@@ -30,6 +42,15 @@ export function validateEnvironment(
     'DASHBOARD_ORIGIN',
     'HASH_PEPPER',
   ];
+
+  // Supabase solo es obligatorio cuando es el driver de storage activo
+  if (storageDriver === 'supabase') {
+    requiredStrings.push(
+      'SUPABASE_URL',
+      'SUPABASE_SERVICE_ROLE_KEY',
+      'SUPABASE_STORAGE_BUCKET',
+    );
+  }
 
   for (const key of requiredStrings) {
     const value = config[key];
@@ -62,7 +83,10 @@ export function validateEnvironment(
     );
   }
 
-  const urlFields = ['SUPABASE_URL', 'LANDING_ORIGIN', 'DASHBOARD_ORIGIN'];
+  const urlFields =
+    storageDriver === 'supabase'
+      ? ['SUPABASE_URL', 'LANDING_ORIGIN', 'DASHBOARD_ORIGIN']
+      : ['LANDING_ORIGIN', 'DASHBOARD_ORIGIN'];
 
   for (const field of urlFields) {
     const value = config[field];

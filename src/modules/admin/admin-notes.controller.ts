@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Query,
   UseGuards,
   UseInterceptors,
@@ -33,6 +34,11 @@ export class AdminNotesController {
   @Get(':id')
   findNoteById(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminNotesService.findNoteById(id);
+  }
+
+  @Patch(':id/approve')
+  approveNote(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminNotesService.approveNote(id);
   }
 
   @Delete(':id')

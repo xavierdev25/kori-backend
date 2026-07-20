@@ -17,7 +17,9 @@ import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
+import { SettingsModule } from './modules/settings/settings.module';
 import { StorageModule } from './modules/storage/storage.module';
+import { SubscribersModule } from './modules/subscribers/subscribers.module';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { StorageModule } from './modules/storage/storage.module';
     PrismaModule,
     StorageModule,
     NotesModule,
+    SubscribersModule,
+    SettingsModule,
     AuthModule,
     AdminModule,
     HealthModule,
