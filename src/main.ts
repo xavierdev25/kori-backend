@@ -68,7 +68,7 @@ async function bootstrap() {
 
       callback(null, false);
     },
-    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     exposedHeaders: ['x-request-id', 'ETag'],
   });
