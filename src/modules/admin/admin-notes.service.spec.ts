@@ -1,4 +1,5 @@
-import { NoteType } from '@prisma/client';
+import { NotFoundException } from '@nestjs/common';
+import { NoteStatus, NoteType } from '@prisma/client';
 
 import { NotesRepository } from '../notes/notes.repository';
 import { StorageService } from '../storage/storage.service';
@@ -15,6 +16,8 @@ describe('AdminNotesService', () => {
       | 'getStats'
       | 'findAdminNotes'
       | 'findAdminNoteById'
+      | 'approveNoteById'
+      | 'rejectNoteById'
     >
   >;
   let storageService: jest.Mocked<Pick<StorageService, 'deleteFile'>>;
@@ -27,6 +30,8 @@ describe('AdminNotesService', () => {
       getStats: jest.fn(),
       findAdminNotes: jest.fn(),
       findAdminNoteById: jest.fn(),
+      approveNoteById: jest.fn(),
+      rejectNoteById: jest.fn(),
     };
     storageService = {
       deleteFile: jest.fn(),
@@ -35,6 +40,39 @@ describe('AdminNotesService', () => {
       repository as unknown as NotesRepository,
       storageService as unknown as StorageService,
     );
+  });
+
+  it('rejectNote sends an approved note back to PENDING', async () => {
+    repository.findNoteById.mockResolvedValue({
+      id: 'note-id',
+      type: NoteType.TEXT,
+      status: NoteStatus.APPROVED,
+      recipientName: 'Kori',
+      message: 'hola',
+      imageUrl: null,
+      storagePath: null,
+      color: 'yellow',
+      rotation: 0,
+      positionX: 0,
+      positionY: 0,
+      zIndex: 1,
+      ipHash: null,
+      userAgentHash: null,
+      createdAt,
+    });
+
+    await service.rejectNote('note-id');
+
+    expect(repository.rejectNoteById).toHaveBeenCalledWith('note-id');
+  });
+
+  it('rejectNote throws NotFoundException for a missing note', async () => {
+    repository.findNoteById.mockResolvedValue(null);
+
+    await expect(service.rejectNote('note-id')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(repository.rejectNoteById).not.toHaveBeenCalled();
   });
 
   it('deleteNote deletes the note', async () => {
@@ -47,8 +85,6 @@ describe('AdminNotesService', () => {
       storagePath: null,
       color: 'yellow',
       rotation: 0,
-      positionX: 0,
-      positionY: 0,
       zIndex: 1,
       ipHash: null,
       userAgentHash: null,
@@ -63,8 +99,6 @@ describe('AdminNotesService', () => {
       storagePath: null,
       color: 'yellow',
       rotation: 0,
-      positionX: 0,
-      positionY: 0,
       zIndex: 1,
       ipHash: null,
       userAgentHash: null,
@@ -89,8 +123,6 @@ describe('AdminNotesService', () => {
       storagePath: 'drawings/file.png',
       color: null,
       rotation: 0,
-      positionX: 0,
-      positionY: 0,
       zIndex: 1,
       ipHash: null,
       userAgentHash: null,
@@ -105,8 +137,6 @@ describe('AdminNotesService', () => {
       storagePath: 'drawings/file.png',
       color: null,
       rotation: 0,
-      positionX: 0,
-      positionY: 0,
       zIndex: 1,
       ipHash: null,
       userAgentHash: null,

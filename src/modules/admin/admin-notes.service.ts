@@ -64,21 +64,20 @@ export class AdminNotesService {
   }
 
   async approveNote(id: string) {
-    const note = await this.notesRepository.findNoteById(id);
-
-    if (!note) {
-      throw new NotFoundException('Nota no encontrada');
-    }
+    await this.assertNoteExists(id);
 
     return this.notesRepository.approveNoteById(id);
   }
 
-  async deleteNote(id: string): Promise<DeleteNoteResponse> {
-    const note = await this.notesRepository.findNoteById(id);
+  /** Devuelve la nota a PENDING: la saca del muro sin borrarla. */
+  async rejectNote(id: string) {
+    await this.assertNoteExists(id);
 
-    if (!note) {
-      throw new NotFoundException('Nota no encontrada');
-    }
+    return this.notesRepository.rejectNoteById(id);
+  }
+
+  async deleteNote(id: string): Promise<DeleteNoteResponse> {
+    const note = await this.assertNoteExists(id);
 
     if (note.storagePath) {
       await this.storageService.deleteFile(note.storagePath);
@@ -94,5 +93,15 @@ export class AdminNotesService {
 
   getStats() {
     return this.notesRepository.getStats();
+  }
+
+  private async assertNoteExists(id: string) {
+    const note = await this.notesRepository.findNoteById(id);
+
+    if (!note) {
+      throw new NotFoundException('Nota no encontrada');
+    }
+
+    return note;
   }
 }

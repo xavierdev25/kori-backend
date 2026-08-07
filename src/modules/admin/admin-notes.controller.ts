@@ -41,6 +41,11 @@ export class AdminNotesController {
     return this.adminNotesService.approveNote(id);
   }
 
+  @Patch(':id/reject')
+  rejectNote(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminNotesService.rejectNote(id);
+  }
+
   @Delete(':id')
   deleteNote(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminNotesService.deleteNote(id);

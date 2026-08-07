@@ -16,7 +16,9 @@ describe('NotesService', () => {
       'createTextNote' | 'createDrawingNote' | 'findPublicNotes'
     >
   >;
-  let storageService: jest.Mocked<Pick<StorageService, 'uploadDrawing'>>;
+  let storageService: jest.Mocked<
+    Pick<StorageService, 'uploadDrawing' | 'deleteFile'>
+  >;
   let configService: jest.Mocked<Pick<ConfigService, 'get'>>;
   let service: NotesService;
 
@@ -28,6 +30,7 @@ describe('NotesService', () => {
     };
     storageService = {
       uploadDrawing: jest.fn(),
+      deleteFile: jest.fn(),
     };
     configService = {
       get: jest.fn().mockReturnValue(testPepper),
@@ -48,8 +51,6 @@ describe('NotesService', () => {
       imageUrl: null,
       color: 'yellow',
       rotation: 0,
-      positionX: 0,
-      positionY: 0,
       zIndex: 1,
       createdAt,
     });
@@ -115,8 +116,6 @@ describe('NotesService', () => {
       imageUrl: null,
       color: 'yellow',
       rotation: 0,
-      positionX: 0,
-      positionY: 0,
       zIndex: 1,
       createdAt,
     });
@@ -144,8 +143,6 @@ describe('NotesService', () => {
       imageUrl: null,
       color: 'yellow',
       rotation: 0,
-      positionX: 0,
-      positionY: 0,
       zIndex: 1,
       createdAt,
     });
@@ -173,8 +170,6 @@ describe('NotesService', () => {
       imageUrl: 'https://example.com/drawing.png',
       color: null,
       rotation: 0,
-      positionX: 0,
-      positionY: 0,
       zIndex: 1,
       createdAt,
     });
@@ -240,6 +235,40 @@ describe('NotesService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('createDrawingNote deletes the uploaded file when the insert fails', async () => {
+    const insertError = new Error('db down');
+
+    storageService.uploadDrawing.mockResolvedValue({
+      imageUrl: 'https://example.com/drawing.png',
+      storagePath: 'drawings/orphan.png',
+    });
+    repository.createDrawingNote.mockRejectedValue(insertError);
+    storageService.deleteFile.mockResolvedValue(undefined);
+
+    await expect(
+      service.createDrawingNote({ recipientName: 'Kori' }, createPngFile()),
+    ).rejects.toBe(insertError);
+
+    expect(storageService.deleteFile).toHaveBeenCalledWith(
+      'drawings/orphan.png',
+    );
+  });
+
+  it('createDrawingNote surfaces the original error when the cleanup also fails', async () => {
+    const insertError = new Error('db down');
+
+    storageService.uploadDrawing.mockResolvedValue({
+      imageUrl: 'https://example.com/drawing.png',
+      storagePath: 'drawings/orphan.png',
+    });
+    repository.createDrawingNote.mockRejectedValue(insertError);
+    storageService.deleteFile.mockRejectedValue(new Error('storage down'));
+
+    await expect(
+      service.createDrawingNote({ recipientName: 'Kori' }, createPngFile()),
+    ).rejects.toBe(insertError);
+  });
+
   it('findPublicNotes returns only public fields from repository mapper', async () => {
     const publicNotes: PublicNoteRecord[] = [
       {
@@ -250,8 +279,6 @@ describe('NotesService', () => {
         imageUrl: null,
         color: 'yellow',
         rotation: 0,
-        positionX: 0,
-        positionY: 0,
         zIndex: 1,
         createdAt,
       },

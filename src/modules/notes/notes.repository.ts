@@ -3,6 +3,10 @@ import { Note, NoteStatus, NoteType, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 
+// positionX / positionY NO se exponen: el muro de la landing calcula la
+// posicion de cada notita con su propio layout (rejilla por hash del id, sin
+// traslapes y adaptado al ancho real del corcho). Las columnas siguen en la
+// tabla como legado —son NOT NULL— pero ningun cliente las lee.
 export const publicNoteSelect = {
   id: true,
   type: true,
@@ -11,8 +15,6 @@ export const publicNoteSelect = {
   imageUrl: true,
   color: true,
   rotation: true,
-  positionX: true,
-  positionY: true,
   zIndex: true,
   createdAt: true,
 } satisfies Prisma.NoteSelect;
@@ -152,9 +154,20 @@ export class NotesRepository {
   }
 
   approveNoteById(id: string): Promise<AdminNoteRecord> {
+    return this.setNoteStatus(id, NoteStatus.APPROVED);
+  }
+
+  rejectNoteById(id: string): Promise<AdminNoteRecord> {
+    return this.setNoteStatus(id, NoteStatus.PENDING);
+  }
+
+  private setNoteStatus(
+    id: string,
+    status: NoteStatus,
+  ): Promise<AdminNoteRecord> {
     return this.prisma.note.update({
       where: { id },
-      data: { status: NoteStatus.APPROVED },
+      data: { status },
       select: adminNoteSelect,
     });
   }

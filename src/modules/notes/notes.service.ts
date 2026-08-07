@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import {
@@ -32,6 +32,8 @@ interface FingerprintHashes {
 
 @Injectable()
 export class NotesService {
+  private readonly logger = new Logger(NotesService.name);
+
   constructor(
     private readonly notesRepository: NotesRepository,
     private readonly storageService: StorageService,
@@ -82,16 +84,36 @@ export class NotesService {
     const storedFile = await this.storageService.uploadDrawing(file);
     const style = randomBaseNoteStyle();
 
-    return this.notesRepository.createDrawingNote({
-      recipientName,
-      imageUrl: storedFile.imageUrl,
-      storagePath: storedFile.storagePath,
-      rotation: style.rotation,
-      positionX: style.positionX,
-      positionY: style.positionY,
-      zIndex: style.zIndex,
-      ...this.createFingerprintHashes(fingerprint),
-    });
+    try {
+      return await this.notesRepository.createDrawingNote({
+        recipientName,
+        imageUrl: storedFile.imageUrl,
+        storagePath: storedFile.storagePath,
+        rotation: style.rotation,
+        positionX: style.positionX,
+        positionY: style.positionY,
+        zIndex: style.zIndex,
+        ...this.createFingerprintHashes(fingerprint),
+      });
+    } catch (error) {
+      // No hay transaccion posible entre Storage y Postgres: si el insert
+      // falla, el archivo ya subido se queda huerfano en el bucket. Se
+      // compensa borrandolo. El fallo del borrado no debe tapar el error
+      // original, que es el que explica por que fallo la peticion.
+      await this.storageService
+        .deleteFile(storedFile.storagePath)
+        .catch((cleanupError: unknown) => {
+          this.logger.error(
+            `No se pudo borrar el dibujo huerfano "${storedFile.storagePath}": ${
+              cleanupError instanceof Error
+                ? cleanupError.message
+                : String(cleanupError)
+            }`,
+          );
+        });
+
+      throw error;
+    }
   }
 
   async findPublicNotes(

@@ -720,10 +720,11 @@ function expectPublicNoteResponse(note: Partial<NoteResponse> | undefined) {
   expect(note).toHaveProperty('imageUrl');
   expect(note).toHaveProperty('color');
   expect(note).toHaveProperty('rotation');
-  expect(note).toHaveProperty('positionX');
-  expect(note).toHaveProperty('positionY');
   expect(note).toHaveProperty('zIndex');
   expect(note).toHaveProperty('createdAt');
+  // legado interno: la landing calcula la posicion por su cuenta
+  expect(note).not.toHaveProperty('positionX');
+  expect(note).not.toHaveProperty('positionY');
   expect(note).not.toHaveProperty('storagePath');
   expect(note).not.toHaveProperty('ipHash');
   expect(note).not.toHaveProperty('userAgentHash');

@@ -191,6 +191,8 @@ Rate limit: 5 req/60s · Response always includes `Cache-Control: no-store`
 | `GET` | `/admin/notes` | Paginated note list with storagePath |
 | `GET` | `/admin/notes/stats` | Total/text/drawing counts |
 | `GET` | `/admin/notes/:id` | Single note detail |
+| `PATCH` | `/admin/notes/:id/approve` | Publish the note on the wall |
+| `PATCH` | `/admin/notes/:id/reject` | Send the note back to `PENDING` (removes it from the wall without deleting it) |
 | `DELETE` | `/admin/notes/:id` | Delete note + storage file if DRAWING |
 
 All admin responses include `Cache-Control: no-store`.

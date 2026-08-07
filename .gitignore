@@ -59,4 +59,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 .codex
 .agent
-.claudeuploads/
+.claude
+
+# archivos subidos por el driver de storage local (solo desarrollo)
+uploads/

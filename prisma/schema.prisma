@@ -20,8 +20,14 @@ model Note {
 
   color         String?
   rotation      Int
+
+  /// Legado: la landing calcula la posicion con su propio layout y estas
+  /// columnas ya no viajan en la API. Se conservan (NOT NULL + CHECK) para
+  /// no migrar la tabla en produccion; se siguen escribiendo con un valor
+  /// aleatorio valido al crear la nota.
   positionX     Int      @map("position_x")
   positionY     Int      @map("position_y")
+
   zIndex        Int      @map("z_index")
 
   ipHash        String?  @map("ip_hash")

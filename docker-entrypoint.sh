@@ -18,18 +18,53 @@ strip_surrounding_quotes() {
   printf '%s' "$value"
 }
 
-export DATABASE_URL="$(strip_surrounding_quotes "${DATABASE_URL:-}")"
-export DIRECT_URL="$(strip_surrounding_quotes "${DIRECT_URL:-}")"
-export SUPABASE_URL="$(strip_surrounding_quotes "${SUPABASE_URL:-}")"
-export SUPABASE_SERVICE_ROLE_KEY="$(strip_surrounding_quotes "${SUPABASE_SERVICE_ROLE_KEY:-}")"
-export SUPABASE_STORAGE_BUCKET="$(strip_surrounding_quotes "${SUPABASE_STORAGE_BUCKET:-}")"
-export ADMIN_USERNAME="$(strip_surrounding_quotes "${ADMIN_USERNAME:-}")"
-export ADMIN_PASSWORD_HASH="$(strip_surrounding_quotes "${ADMIN_PASSWORD_HASH:-}")"
-export JWT_SECRET="$(strip_surrounding_quotes "${JWT_SECRET:-}")"
-export JWT_EXPIRES_IN="$(strip_surrounding_quotes "${JWT_EXPIRES_IN:-}")"
-export LANDING_ORIGIN="$(strip_surrounding_quotes "${LANDING_ORIGIN:-}")"
-export DASHBOARD_ORIGIN="$(strip_surrounding_quotes "${DASHBOARD_ORIGIN:-}")"
-export PORT="$(strip_surrounding_quotes "${PORT:-4000}")"
-export NODE_ENV="$(strip_surrounding_quotes "${NODE_ENV:-production}")"
+# Solo se toca la variable si viene definida: exportar una opcional vacia
+# cambia el comportamiento del backend (p. ej. STORAGE_DRIVER="" no es
+# nullish y hace fallar la validacion de entorno, que espera
+# "supabase" | "local" | ausente).
+unquote_if_set() {
+  name=$1
+
+  eval "is_set=\${$name+yes}"
+  [ "${is_set:-}" = yes ] || return 0
+
+  eval "current=\$$name"
+  export "$name=$(strip_surrounding_quotes "$current")"
+}
+
+# Valores por defecto antes de limpiar comillas
+export PORT="${PORT:-4000}"
+export NODE_ENV="${NODE_ENV:-production}"
+
+# Todas las variables que lee el backend. JWT_ISSUER / JWT_AUDIENCE /
+# HASH_PEPPER son obligatorias: si llegaran entrecomilladas, el token se
+# firmaria con un issuer distinto al validado y todo /admin/* daria 401.
+for kori_env_var in \
+  DATABASE_URL \
+  DIRECT_URL \
+  SUPABASE_URL \
+  SUPABASE_SERVICE_ROLE_KEY \
+  SUPABASE_STORAGE_BUCKET \
+  ADMIN_USERNAME \
+  ADMIN_PASSWORD_HASH \
+  JWT_SECRET \
+  JWT_EXPIRES_IN \
+  JWT_ISSUER \
+  JWT_AUDIENCE \
+  HASH_PEPPER \
+  LANDING_ORIGIN \
+  DASHBOARD_ORIGIN \
+  PORT \
+  NODE_ENV \
+  ENABLE_REQUEST_LOGGING \
+  TRUST_PROXY \
+  STORAGE_DRIVER \
+  PUBLIC_BASE_URL \
+  SENTRY_DSN
+do
+  unquote_if_set "$kori_env_var"
+done
+
+unset kori_env_var
 
 exec "$@"
