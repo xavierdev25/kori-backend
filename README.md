@@ -296,6 +296,31 @@ docker run --rm --env-file .env kori-backend:migrator
 
 ---
 
+## Keeping free tiers awake
+
+Two independent timers can take this service down, and they need different
+solutions:
+
+| Timer | Trigger | Consequence | Solution |
+|---|---|---|---|
+| **Supabase pause** | ~7 days without database activity | Project pauses → `PrismaService` fails at boot → Render crash-loops → every request hangs indefinitely | `.github/workflows/keep-alive.yml` pings `/health/readiness` (`SELECT 1`) every 6 h |
+| **Render spin-down** | 15 min without HTTP traffic | Next visitor waits ~50 s for a cold start | External uptime monitor every 5–10 min |
+
+**Why GitHub Actions does not solve the Render spin-down:** scheduled workflows
+are frequently delayed (sometimes past 30 min), and GitHub disables them after
+60 days without commits — precisely the idle scenario being guarded against.
+It is reliable enough for a 7-day window, not for a 15-minute one.
+
+**Cost of staying warm:** Render's free tier allows 750 instance-hours/month
+and a month is ~730 h, so keeping the service up 24/7 consumes nearly the whole
+allowance. Pinging only during active hours (e.g. 09:00–02:00) leaves headroom.
+
+Recovering from a pause: resume the project in Supabase, verify that
+`DATABASE_URL` / `DIRECT_URL` still match the dashboard (the pooler host can
+change), then redeploy on Render if it stayed in backoff.
+
+---
+
 ## CI/CD
 
 GitHub Actions pipeline at `.github/workflows/ci.yml`:

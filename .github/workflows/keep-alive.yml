@@ -1,0 +1,67 @@
+name: Keep alive
+
+# Evita que Supabase (plan free) pause el proyecto por inactividad: la pausa
+# se dispara tras ~7 dias sin actividad de base de datos, y al volver el
+# backend entra en crash loop porque PrismaService falla al arrancar.
+#
+# /health/readiness ejecuta un `SELECT 1`, asi que cada ping cuenta como
+# actividad real de la DB. De paso sirve de monitor: si el job falla, GitHub
+# avisa por correo.
+#
+# OJO: esto NO mantiene despierto el contenedor de Render, que se duerme a los
+# 15 min. El cron de GitHub Actions se retrasa con frecuencia (a veces >30 min)
+# y ademas GitHub desactiva los workflows programados tras 60 dias sin commits
+# en el repo. Para la ventana de 15 min hace falta un monitor externo.
+
+on:
+  schedule:
+    # Cada 6 horas: de sobra para una pausa que tarda 7 dias en llegar.
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    name: Ping readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Despertar backend y validar la DB
+        env:
+          # Variable del repo; si no esta definida, usa la URL de produccion.
+          BACKEND_URL: ${{ vars.BACKEND_URL || 'https://kori-backend-9lzl.onrender.com' }}
+        run: |
+          set -uo pipefail
+
+          url="${BACKEND_URL%/}/health/readiness"
+
+          # El primer intento puede tardar ~50 s si Render estaba dormido:
+          # timeout amplio y reintentos con espera creciente.
+          for attempt in 1 2 3 4; do
+            echo "::group::Intento $attempt"
+            body=$(curl -sS --max-time 120 -w '\n%{http_code}' "$url" 2>&1) && rc=0 || rc=$?
+            status=$(printf '%s' "$body" | tail -n1)
+            payload=$(printf '%s' "$body" | sed '$d')
+            echo "curl rc=$rc http=$status"
+            echo "$payload"
+            echo "::endgroup::"
+
+            if [ "$rc" -eq 0 ] && [ "$status" = "200" ]; then
+              # No basta con el 200: readiness puede responder sin la DB viva.
+              if printf '%s' "$payload" | grep -q '"database":"ok"'; then
+                echo "Backend despierto y base de datos accesible."
+                exit 0
+              fi
+              echo "::warning::200 pero la DB no reporta ok."
+            fi
+
+            [ "$attempt" -lt 4 ] && sleep $((attempt * 20))
+          done
+
+          echo "::error::El backend no respondio con la DB accesible tras 4 intentos."
+          echo "Revisa: (1) proyecto de Supabase pausado, (2) DATABASE_URL/DIRECT_URL en Render, (3) logs del servicio."
+          exit 1
