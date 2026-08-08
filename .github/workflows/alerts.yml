@@ -33,9 +33,13 @@ jobs:
         run: |
           set -uo pipefail
 
+          # Sin secreto la vigilancia no esta configurada todavia: se avisa
+          # pero no se falla. Un workflow en rojo cada hora antes del primer
+          # despliegue solo ensena a ignorar las alertas de verdad.
           if [ -z "${INTERNAL_TASK_SECRET:-}" ]; then
-            echo "::error::Falta el secreto INTERNAL_TASK_SECRET."
-            exit 1
+            echo "::warning::INTERNAL_TASK_SECRET no configurado: vigilancia inactiva."
+            echo "Anadelo en Settings > Secrets con el mismo valor que en Render."
+            exit 0
           fi
 
           url="${BACKEND_URL%/}/internal/outbox/alerts"
@@ -50,6 +54,14 @@ jobs:
             echo "curl rc=$rc http=$status"
             echo "$payload"
             echo "::endgroup::"
+
+            # 404 = el backend desplegado es anterior a esta funcion. No es
+            # una caida: es que todavia no se ha desplegado el codigo nuevo.
+            if [ "$status" = "404" ]; then
+              echo "::warning::El backend desplegado aun no tiene /internal/outbox/alerts."
+              echo "Despliega el codigo actual y esta vigilancia empezara a funcionar."
+              exit 0
+            fi
 
             if [ "$rc" -eq 0 ] && [ "$status" = "200" ]; then
               if printf '%s' "$payload" | grep -q '"healthy":true'; then

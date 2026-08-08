@@ -17,7 +17,10 @@ RUN apt-get update \
 
 FROM base AS deps
 
-COPY package.json pnpm-lock.yaml ./
+# pnpm-workspace.yaml es obligatorio: contiene los overrides y
+# onlyBuiltDependencies. Sin el, --frozen-lockfile falla con
+# ERR_PNPM_LOCKFILE_CONFIG_MISMATCH y la imagen no se construye.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile
@@ -47,7 +50,7 @@ FROM base AS prod-deps
 
 ENV NODE_ENV=production
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 

@@ -37,9 +37,11 @@ jobs:
         run: |
           set -uo pipefail
 
+          # Igual que en alerts: sin secreto todavia no esta configurado.
           if [ -z "${INTERNAL_TASK_SECRET:-}" ]; then
-            echo "::error::Falta el secreto INTERNAL_TASK_SECRET en el repositorio."
-            exit 1
+            echo "::warning::INTERNAL_TASK_SECRET no configurado: barrido inactivo."
+            echo "Anadelo en Settings > Secrets con el mismo valor que en Render."
+            exit 0
           fi
 
           url="${BACKEND_URL%/}/internal/outbox/run"
@@ -54,6 +56,13 @@ jobs:
             echo "curl rc=$rc http=$status"
             echo "$payload"
             echo "::endgroup::"
+
+            # 404 = el backend desplegado no tiene todavia la cola de trabajos.
+            if [ "$status" = "404" ]; then
+              echo "::warning::El backend desplegado aun no tiene /internal/outbox/run."
+              echo "Despliega el codigo actual y el barrido empezara a funcionar."
+              exit 0
+            fi
 
             if [ "$rc" -eq 0 ] && [ "$status" = "200" ]; then
               # Un trabajo agotado ya genera su propio correo de alerta, pero
