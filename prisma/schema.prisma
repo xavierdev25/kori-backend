@@ -72,3 +72,458 @@ model AppSetting {
 
   @@map("app_settings")
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// TIENDA — merch print on demand
+//
+// Reglas que atraviesan todo este bloque:
+//   · Todo el dinero en enteros (centavos). Nunca Float.
+//   · Moneda base MXN.
+//   · Los precios se leen SIEMPRE del servidor; el cliente nunca los manda.
+//   · El historial de ventas se lee de las copias congeladas en OrderItem,
+//     jamás haciendo join al precio actual del producto.
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── Autenticación del dashboard ───────────────────────────────────
+
+enum UserRole {
+  ARTIST
+  ADMIN
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         UserRole @default(ARTIST)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+/// Se guarda el hash del refresh token, nunca el token en claro: si se filtra
+/// la tabla no se puede suplantar a nadie. Rotación en cada uso.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─── Catálogo ──────────────────────────────────────────────────────
+
+enum ProductType {
+  POD_APPAREL
+  PHYSICAL_INVENTORY
+  DIGITAL
+}
+
+enum FulfillmentType {
+  POD
+  INVENTORY
+  DIGITAL
+}
+
+model Product {
+  id              String          @id @default(uuid())
+  name            String
+  slug            String          @unique
+  description     String?
+  type            ProductType     @default(POD_APPAREL)
+  fulfillmentType FulfillmentType @default(POD) @map("fulfillment_type")
+
+  /// Nace despublicado: se activa a mano desde el dashboard cuando las
+  /// variantes ya tienen providerProductUid y archivo de impresión.
+  isActive  Boolean  @default(false) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  variants ProductVariant[]
+  images   ProductImage[]
+
+  @@index([isActive, createdAt])
+  @@map("products")
+}
+
+model ProductVariant {
+  id        String  @id @default(uuid())
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  size  String?
+  color String?
+
+  /// Etiqueta legible que se congela en OrderItem: "M / Negro".
+  label      String
+  sku        String @unique
+  priceCents Int    @map("price_cents")
+
+  /// Identificador de la prenda en el proveedor (modelo + talla + color).
+  /// Se captura a mano desde el dashboard; sin él no se puede producir.
+  providerProductUid String? @map("provider_product_uid")
+
+  /// URL pública del archivo de impresión. El proveedor la descarga desde
+  /// sus servidores, así que tiene que ser accesible sin autenticación.
+  /// El providerProductUid describe la prenda; esto es el diseño.
+  printFileUrl String? @map("print_file_url")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  orderItems OrderItem[]
+
+  /// El único sobre (size,color) no protege cuando alguno es NULL —Postgres
+  /// trata los NULL como distintos—, por eso va también sobre label.
+  @@unique([productId, size, color])
+  @@unique([productId, label])
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  url String
+
+  /// Ruta dentro del bucket de Supabase, para poder borrar el objeto al
+  /// borrar la fila. Mismo patrón que Note.storagePath.
+  storagePath String? @map("storage_path")
+  altText     String? @map("alt_text")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  /// Una sola principal por producto: lo garantiza un índice único parcial
+  /// creado en la migración (Prisma no sabe expresarlo).
+  isPrimary Boolean  @default(false) @map("is_primary")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([productId, sortOrder])
+  @@map("product_images")
+}
+
+// ─── Cotización de envío ───────────────────────────────────────────
+
+model ShippingQuote {
+  id          String @id @default(uuid())
+  countryCode String @map("country_code")
+  postalCode  String @map("postal_code")
+
+  /// Snapshot del carrito cotizado más su hash canónico. El checkout rechaza
+  /// cualquier carrito que no coincida: sin esto se cotiza el envío de una
+  /// playera y se compran veinte con esa cotización.
+  items     Json
+  itemsHash String @map("items_hash")
+
+  amountCents      Int    @map("amount_cents")
+  currency         String @default("MXN")
+  estimatedDaysMin Int?   @map("estimated_days_min")
+  estimatedDaysMax Int?   @map("estimated_days_max")
+
+  /// Método de envío elegido. HAY que mandarlo al crear la orden: si se omite,
+  /// el proveedor escoge el más barato del momento, que puede no ser
+  /// el que se le cobró al comprador.
+  shipmentMethodUid  String? @map("shipment_method_uid")
+  shipmentMethodName String? @map("shipment_method_name")
+
+  /// Id de la cotización en el proveedor, para abrir casos de soporte.
+  providerQuoteId String? @map("provider_quote_id")
+
+  /// Respuesta cruda del proveedor, para poder abrir casos de soporte.
+  providerPayload Json     @map("provider_payload")
+  expiresAt     DateTime @map("expires_at")
+
+  /// De un solo uso: se marca al crear la sesión de checkout.
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  orders Order[]
+
+  @@index([expiresAt])
+  @@map("shipping_quotes")
+}
+
+// ─── Ventas ────────────────────────────────────────────────────────
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  IN_PRODUCTION
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+  NEEDS_REVIEW
+}
+
+enum SaleSource {
+  STRIPE
+  PAYHIP
+}
+
+model Order {
+  id String @id @default(uuid())
+
+  /// Número corto y legible para dar soporte por DM ("tu pedido #1043").
+  /// Enseñar un uuid al comprador no sirve para nada.
+  orderNumber Int         @unique @default(autoincrement()) @map("order_number")
+  status      OrderStatus @default(PENDING_PAYMENT)
+  source      SaleSource  @default(STRIPE)
+
+  stripeCheckoutSessionId String? @unique @map("stripe_checkout_session_id")
+
+  /// Único: la defensa de último recurso contra el doble procesamiento.
+  /// Null hasta que el pago se confirma.
+  stripePaymentIntentId String? @unique @map("stripe_payment_intent_id")
+
+  /// Marca de idempotencia: "¿ya mandamos este pedido a producir?". No sirve
+  /// un id único de proveedor: algunos parten el pedido entre centros de
+  /// producción y devuelven VARIOS ids para una sola llamada.
+  fulfillmentSubmittedAt DateTime? @map("fulfillment_submitted_at")
+  fulfillmentError       String?   @map("fulfillment_error")
+  fulfillmentAttempts    Int       @default(0) @map("fulfillment_attempts")
+
+  subtotalCents Int    @map("subtotal_cents")
+  shippingCents Int    @map("shipping_cents")
+  totalCents    Int    @map("total_cents")
+  currency      String @default("MXN")
+
+  shippingQuoteId String?        @map("shipping_quote_id")
+  shippingQuote   ShippingQuote? @relation(fields: [shippingQuoteId], references: [id])
+
+  customerEmail String  @map("customer_email")
+  customerName  String? @map("customer_name")
+  customerPhone String? @map("customer_phone")
+
+  shipName       String? @map("ship_name")
+  shipLine1      String? @map("ship_line1")
+  shipLine2      String? @map("ship_line2")
+  shipCity       String? @map("ship_city")
+  shipState      String? @map("ship_state")
+  shipPostalCode String? @map("ship_postal_code")
+  shipCountry    String? @map("ship_country")
+
+  // El tracking vive en FulfillmentOrder: un pedido partido llega en varios envíos
+  // con códigos distintos, y enseñar uno solo sería mentirle al comprador.
+
+  /// Por qué acabó en NEEDS_REVIEW (p. ej. el país de la dirección final no
+  /// coincide con el que se cotizó).
+  reviewReason String? @map("review_reason")
+
+  paidAt      DateTime? @map("paid_at")
+  shippedAt   DateTime? @map("shipped_at")
+  deliveredAt DateTime? @map("delivered_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  items        OrderItem[]
+  events       OrderEvent[]
+  jobs         OutboxJob[]
+  fulfillmentOrders FulfillmentOrder[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([customerEmail])
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String @map("order_id")
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Restrict: una variante con ventas no se puede borrar nunca. La regla se
+  /// bloquea además en el servicio, pero esto es la red de seguridad.
+  productVariantId String         @map("product_variant_id")
+  productVariant   ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+
+  // ── Copia congelada al momento de la venta. ─────────────────────
+  // El historial se lee SIEMPRE de aquí. Si el precio cambia mañana,
+  // las ventas de ayer no cambian.
+  productName      String          @map("product_name")
+  variantLabel     String          @map("variant_label")
+  sku              String
+  unitPriceCents   Int             @map("unit_price_cents")
+  quantity         Int
+  lineTotalCents   Int             @map("line_total_cents")
+  providerProductUid String?         @map("provider_product_uid")
+  printFileUrl     String?         @map("print_file_url")
+  fulfillmentType  FulfillmentType @map("fulfillment_type")
+
+  @@index([orderId])
+  @@index([productVariantId])
+  @@map("order_items")
+}
+
+/// Una orden nuestra puede convertirse en VARIAS órdenes del proveedor si
+/// este reparte los artículos entre centros de producción y devuelve un id
+/// por cada trozo.
+///
+/// La llamada de creación sigue siendo una sola; por eso la idempotencia vive
+/// en Order.fulfillmentSubmittedAt y no aquí.
+model FulfillmentOrder {
+  id      String @id @default(uuid())
+  orderId String @map("order_id")
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Id en el proveedor. Único de verdad: cada trozo tiene el suyo.
+  providerOrderId String @unique @map("provider_order_id")
+
+  /// Qué proveedor produjo este trozo ("creatuplayera", "kongmerch",
+  /// "manual"…). No es un enum: cambiar de proveedor no debe costar una
+  /// migración destructiva.
+  provider String @default("manual")
+
+  /// Estado tal cual lo manda el proveedor, sin traducir. El estado del
+  /// pedido nuestro se deriva de todos sus trozos.
+  fulfillmentStatus String @map("fulfillment_status")
+
+  trackingCode       String? @map("tracking_code")
+  trackingUrl        String? @map("tracking_url")
+  shipmentMethodName String? @map("shipment_method_name")
+
+  /// País donde se imprimió. Si no es MX el envío cruza frontera y puede
+  /// haber aduana: dato relevante para soporte.
+  fulfillmentCountry String? @map("fulfillment_country")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([orderId])
+  @@map("fulfillment_orders")
+}
+
+/// Línea de tiempo del detalle de venta. Con solo paidAt/shippedAt/
+/// deliveredAt no se puede representar NEEDS_REVIEW, un reintento de producción
+/// ni una cancelación.
+model OrderEvent {
+  id      String @id @default(uuid())
+  orderId String @map("order_id")
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  status    OrderStatus
+  note      String?
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  @@index([orderId, createdAt])
+  @@map("order_events")
+}
+
+// ─── Idempotencia y trabajo diferido ───────────────────────────────
+
+enum WebhookProvider {
+  STRIPE
+  GELATO
+}
+
+/// Se inserta ANTES de procesar: la violación de unicidad es lo que detecta
+/// el duplicado. Marcarlo después dejaría una ventana en la que dos
+/// reintentos simultáneos entran los dos.
+model WebhookEvent {
+  eventId     String          @id @map("event_id")
+  provider    WebhookProvider
+  receivedAt  DateTime        @default(now()) @map("received_at")
+  processedAt DateTime?       @map("processed_at")
+  payload     Json
+  error       String?
+
+  @@index([provider, receivedAt])
+  @@map("webhook_events")
+}
+
+enum OutboxJobType {
+  FULFILL_ORDER
+  SEND_ORDER_CONFIRMATION
+  SEND_SHIPPING_NOTIFICATION
+  SEND_ADMIN_ALERT
+}
+
+enum OutboxJobStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+/// La cola vive en Postgres a propósito. El contenedor de Render se duerme a
+/// los 15 min y el Key Value gratuito solo guarda en memoria: una cola en
+/// memoria perdería el fulfillment de un pedido ya pagado, en silencio.
+model OutboxJob {
+  id     String          @id @default(uuid())
+  type   OutboxJobType
+  status OutboxJobStatus @default(PENDING)
+
+  /// Idempotencia del job: "FULFILL_ORDER:<orderId>". Encolar dos veces
+  /// lo mismo viola el único y no hace nada.
+  dedupeKey String @unique @map("dedupe_key")
+  payload   Json
+
+  attempts    Int @default(0)
+  maxAttempts Int @default(5) @map("max_attempts")
+
+  /// Backoff exponencial: hasta esta hora no se vuelve a tomar.
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+  lastError     String?  @map("last_error")
+
+  orderId String? @map("order_id")
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([orderId])
+  @@map("outbox_jobs")
+}
+/// Quien cambio que en el panel.
+///
+/// Es un sistema que mueve dinero: cuando un precio aparece cambiado o un
+/// producto se despublica solo, la pregunta es "quien y cuando", y sin esto
+/// no hay forma de responderla. Solo registra escrituras del panel; las
+/// lecturas no interesan y llenarian la tabla.
+model AuditLog {
+  id String @id @default(uuid())
+
+  /// Se guardan id y correo: el correo queda congelado aunque el usuario
+  /// cambie el suyo o se borre, igual que las copias de OrderItem.
+  userId    String? @map("user_id")
+  userEmail String  @map("user_email")
+  userRole  String  @map("user_role")
+
+  /// "POST /admin/products" — que se hizo.
+  action String
+
+  /// Sobre que se hizo: "product", "variant", "image"...
+  entity   String
+  entityId String? @map("entity_id")
+
+  /// Datos relevantes del cambio, ya filtrados. Nunca contrasenas ni tokens.
+  metadata Json?
+
+  /// La IP va hasheada con HASH_PEPPER, como en las notitas: sirve para
+  /// correlacionar sin guardar un dato personal en claro.
+  ipHash String? @map("ip_hash")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}

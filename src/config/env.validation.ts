@@ -29,11 +29,12 @@ export function validateEnvironment(
     );
   }
 
+  // ADMIN_USERNAME y ADMIN_PASSWORD_HASH dejaron de ser obligatorias: la
+  // identidad vive en la tabla `users` y esas variables solo las lee el seed.
+  // Se siguen aceptando si están definidas; no se exigen.
   const requiredStrings: string[] = [
     'DATABASE_URL',
     'DIRECT_URL',
-    'ADMIN_USERNAME',
-    'ADMIN_PASSWORD_HASH',
     'JWT_SECRET',
     'JWT_EXPIRES_IN',
     'JWT_ISSUER',
@@ -76,10 +77,107 @@ export function validateEnvironment(
 
   if (
     typeof config['ADMIN_PASSWORD_HASH'] === 'string' &&
+    config['ADMIN_PASSWORD_HASH'].trim() !== '' &&
     !/^\$2[aby]\$\d{2}\$/.test(config['ADMIN_PASSWORD_HASH'])
   ) {
     errors.push(
       'ADMIN_PASSWORD_HASH must be a valid bcrypt hash ($2b$, $2a$, or $2y$ prefix)',
+    );
+  }
+
+  // Secreto separado para los tokens de acceso. Opcional: si falta se usa
+  // JWT_SECRET, de modo que desplegar no exige tocar variables antes.
+  if (
+    typeof config['JWT_ACCESS_SECRET'] === 'string' &&
+    config['JWT_ACCESS_SECRET'].length < 32
+  ) {
+    errors.push('JWT_ACCESS_SECRET must be at least 32 characters long');
+  }
+
+  // Stripe. Opcionales a propósito: sin ellas el checkout responde 503 y el
+  // resto del backend (muro de notitas, panel) sigue funcionando. Así se puede
+  // desplegar la tienda antes de tener la cuenta de Stripe lista.
+  const stripeKey = config['STRIPE_SECRET_KEY'] as string | undefined;
+
+  if (stripeKey) {
+    if (!/^sk_(test|live)_/.test(stripeKey)) {
+      errors.push(
+        'STRIPE_SECRET_KEY must start with sk_test_ or sk_live_ (never use a publishable pk_ key on the server)',
+      );
+    }
+
+    const webhookSecret = config['STRIPE_WEBHOOK_SECRET'] as string | undefined;
+
+    if (!webhookSecret) {
+      errors.push(
+        'STRIPE_WEBHOOK_SECRET is required when STRIPE_SECRET_KEY is set — without it webhook signatures cannot be verified',
+      );
+    } else if (!webhookSecret.startsWith('whsec_')) {
+      errors.push('STRIPE_WEBHOOK_SECRET must start with whsec_');
+    }
+
+    for (const key of ['STRIPE_SUCCESS_URL', 'STRIPE_CANCEL_URL']) {
+      const value = config[key];
+
+      if (!value || typeof value !== 'string') {
+        errors.push(`${key} is required when STRIPE_SECRET_KEY is set`);
+        continue;
+      }
+
+      try {
+        new URL(value);
+      } catch {
+        errors.push(`${key} must be a valid URL`);
+      }
+    }
+
+    if (isProduction && stripeKey.startsWith('sk_test_')) {
+      errors.push(
+        'STRIPE_SECRET_KEY is a test key but NODE_ENV=production — real customers would not be charged',
+      );
+    }
+  }
+
+  // Secreto del barrido de la cola. Si es corto, es adivinable: ese endpoint
+  // ejecuta trabajos, así que un secreto débil es peor que no tenerlo.
+  const taskSecret = config['INTERNAL_TASK_SECRET'];
+
+  if (typeof taskSecret === 'string' && taskSecret.length < 24) {
+    errors.push('INTERNAL_TASK_SECRET must be at least 24 characters long');
+  }
+
+  if (isProduction && !taskSecret) {
+    console.warn(
+      '[env] INTERNAL_TASK_SECRET no definido: el barrido externo de la cola quedará cerrado. ' +
+        'Sin él, un pedido pagado puede quedarse sin procesar mientras Render duerme.',
+    );
+  }
+
+  // Cookies de sesión. El panel y el backend están en dominios distintos, así
+  // que SameSite=Lax no envía la cookie y la sesión no funciona. Ver
+  // buildCookieOptions() para el detalle.
+  const sameSite = config['COOKIE_SAMESITE'] as string | undefined;
+
+  if (sameSite !== undefined && !['lax', 'strict', 'none'].includes(sameSite)) {
+    errors.push(
+      `COOKIE_SAMESITE must be lax, strict or none (got: "${sameSite}")`,
+    );
+  }
+
+  // El navegador descarta cualquier cookie SameSite=None sin Secure: esta
+  // combinación deja la sesión rota de una forma difícil de diagnosticar.
+  if (sameSite === 'none' && config['COOKIE_SECURE'] === 'false') {
+    errors.push(
+      'COOKIE_SAMESITE=none requires COOKIE_SECURE=true — browsers reject SameSite=None cookies without the Secure attribute',
+    );
+  }
+
+  if (isProduction && sameSite === undefined) {
+    // No es un error: el valor por defecto en producción ya es 'none'.
+    // Se avisa para que la decisión sea consciente.
+    console.warn(
+      '[env] COOKIE_SAMESITE no definido: se usará "none" (backend y panel en dominios distintos). ' +
+        'Con un dominio propio compartido, define COOKIE_SAMESITE=lax.',
     );
   }
 

@@ -1,0 +1,71 @@
+name: Alerts
+
+# Vigila la salud del NEGOCIO, no la del servidor.
+#
+# /health dice si el proceso responde. Esto dice si hay dinero cobrado que se
+# quedo sin producir: pedidos en NEEDS_REVIEW, trabajos agotados, o pagos que
+# llevan rato sin mandarse a produccion.
+#
+# Cuando falla, GitHub manda un correo. Ese es el mecanismo de alerta: sin
+# pagar nada y sin montar un Prometheus para una tienda de un producto.
+
+on:
+  schedule:
+    # Cada hora. Un pedido atascado no puede esperar a que alguien mire.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: alerts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Revisar pedidos atascados
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Consultar alertas
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL || 'https://kori-backend-9lzl.onrender.com' }}
+          INTERNAL_TASK_SECRET: ${{ secrets.INTERNAL_TASK_SECRET }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${INTERNAL_TASK_SECRET:-}" ]; then
+            echo "::error::Falta el secreto INTERNAL_TASK_SECRET."
+            exit 1
+          fi
+
+          url="${BACKEND_URL%/}/internal/outbox/alerts"
+
+          # Render puede estar dormido: el primer intento tarda ~50 s.
+          for attempt in 1 2 3; do
+            echo "::group::Intento $attempt"
+            body=$(curl -sS --max-time 120 -w '\n%{http_code}' \
+              -H "x-internal-secret: ${INTERNAL_TASK_SECRET}" "$url" 2>&1) && rc=0 || rc=$?
+            status=$(printf '%s' "$body" | tail -n1)
+            payload=$(printf '%s' "$body" | sed '$d')
+            echo "curl rc=$rc http=$status"
+            echo "$payload"
+            echo "::endgroup::"
+
+            if [ "$rc" -eq 0 ] && [ "$status" = "200" ]; then
+              if printf '%s' "$payload" | grep -q '"healthy":true'; then
+                echo "Sin pedidos atascados."
+                exit 0
+              fi
+
+              echo "::error::Hay pedidos o trabajos atascados: $payload"
+              echo "Revisa /dashboard/sales filtrando por 'Necesita revision'."
+              exit 1
+            fi
+
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 20))
+          done
+
+          # No poder consultar tambien es una alerta: puede que el backend
+          # lleve horas caido y nadie se haya enterado.
+          echo "::error::No se pudo consultar el estado tras 3 intentos."
+          exit 1

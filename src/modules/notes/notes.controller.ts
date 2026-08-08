@@ -20,7 +20,7 @@ import {
   ALLOWED_DRAWING_MIME_TYPES,
   MAX_DRAWING_FILE_SIZE_BYTES,
 } from '../../common/constants/note.constants';
-import { PublicNotesCacheInterceptor } from '../../common/interceptors/public-notes-cache.interceptor';
+import { PublicCacheInterceptor } from '../../common/interceptors/public-cache.interceptor';
 import { CreateDrawingNoteDto } from './dto/create-drawing-note.dto';
 import { CreateTextNoteDto } from './dto/create-text-note.dto';
 import { NotesService } from './notes.service';
@@ -80,7 +80,7 @@ export class NotesController {
   }
 
   @Get('public')
-  @UseInterceptors(PublicNotesCacheInterceptor)
+  @UseInterceptors(new PublicCacheInterceptor(30, 60))
   findPublicNotes(
     @Query('limit', new DefaultValuePipe(200), ParseIntPipe) limit: number,
   ) {

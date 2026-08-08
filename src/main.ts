@@ -1,8 +1,10 @@
 import type { ServerResponse } from 'http';
 import { join } from 'path';
 
+import { VERSION_NEUTRAL, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import compression from 'compression';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import * as Sentry from '@sentry/node';
 import helmet from 'helmet';
@@ -13,8 +15,41 @@ import { LOCAL_UPLOADS_DIR } from './modules/storage/storage.service';
 type CorsOriginCallback = (error: Error | null, allow?: boolean) => void;
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody: true es obligatorio para verificar la firma de los webhooks de
+  // Stripe. Sin esto, Nest parsea el JSON y la firma calculada nunca coincide
+  // con la de la cabecera: falla SIEMPRE, y el error no dice por qué.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
   const configService = app.get(ConfigService);
+
+  /**
+   * Versionado por URI, servido en dos rutas a la vez:
+   *   /products      (neutral, lo que ya consumen la landing y el panel)
+   *   /v1/products   (versionado, el camino nuevo)
+   *
+   * Se hace ahora porque añadir /v1 con clientes ya desplegados obliga a
+   * coordinar tres repos; hacerlo aquí no rompe nada. El día que /v2 cambie
+   * un contrato, los clientes viejos siguen contra /v1.
+   */
+  app.enableVersioning({
+    type: VersioningType.URI,
+    defaultVersion: [VERSION_NEUTRAL, '1'],
+  });
+
+  /**
+   * Gzip en las respuestas. Importa más de lo que parece en el plan gratuito:
+   * el catálogo y el listado de notas son JSON muy repetitivo, y menos bytes
+   * son menos milisegundos para alguien con red mala.
+   */
+  app.use(compression());
+
+  /**
+   * Render manda SIGTERM al desplegar y al dormir el contenedor. Sin esto,
+   * Nest no cierra la conexión de Prisma ni deja terminar lo que esté en
+   * curso: se corta un webhook a medias o un job del outbox sin marcar.
+   */
+  app.enableShutdownHooks();
 
   // Observabilidad opcional: solo se activa si hay SENTRY_DSN definido.
   // El tier gratuito de Sentry sobra para este proyecto.
@@ -68,6 +103,10 @@ async function bootstrap() {
 
       callback(null, false);
     },
+    // Sin esto el navegador no envía ni acepta las cookies de sesión del
+    // panel. Es seguro porque el origen va por allowlist, nunca '*': la
+    // combinación credentials + comodín la rechaza el propio navegador.
+    credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     exposedHeaders: ['x-request-id', 'ETag'],

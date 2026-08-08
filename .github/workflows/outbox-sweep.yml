@@ -1,0 +1,73 @@
+name: Outbox sweep
+
+# Vacia la cola de trabajos pendientes (correos, envio a produccion).
+#
+# Por que hace falta un cron externo: el temporizador interno del backend
+# muere cuando Render duerme el contenedor a los 15 min. Si nadie visita la
+# tienda, un pedido pagado se quedaria encolado indefinidamente y el comprador
+# no recibiria ni su confirmacion.
+#
+# OJO con las limitaciones de GitHub Actions (las mismas que el keep-alive):
+# el cron se retrasa con frecuencia y GitHub desactiva los workflows
+# programados tras 60 dias sin commits en el repo. Para una tienda con ventas
+# de verdad, conviene un monitor externo apuntando al mismo endpoint.
+
+on:
+  schedule:
+    # Cada 10 minutos. La cola tambien se dispara sola tras cada webhook de
+    # pago, asi que esto es la red de seguridad, no el camino principal.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: outbox-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Procesar cola pendiente
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Ejecutar barrido
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL || 'https://kori-backend-9lzl.onrender.com' }}
+          INTERNAL_TASK_SECRET: ${{ secrets.INTERNAL_TASK_SECRET }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${INTERNAL_TASK_SECRET:-}" ]; then
+            echo "::error::Falta el secreto INTERNAL_TASK_SECRET en el repositorio."
+            exit 1
+          fi
+
+          url="${BACKEND_URL%/}/internal/outbox/run"
+
+          # El primer intento puede tardar ~50 s si Render estaba dormido.
+          for attempt in 1 2 3; do
+            echo "::group::Intento $attempt"
+            body=$(curl -sS --max-time 120 -w '\n%{http_code}' -X POST "$url" \
+              -H "x-internal-secret: ${INTERNAL_TASK_SECRET}" 2>&1) && rc=0 || rc=$?
+            status=$(printf '%s' "$body" | tail -n1)
+            payload=$(printf '%s' "$body" | sed '$d')
+            echo "curl rc=$rc http=$status"
+            echo "$payload"
+            echo "::endgroup::"
+
+            if [ "$rc" -eq 0 ] && [ "$status" = "200" ]; then
+              # Un trabajo agotado ya genera su propio correo de alerta, pero
+              # tambien se marca aqui para que se vea en la pestana de Actions.
+              if printf '%s' "$payload" | grep -qv '"failed":0'; then
+                echo "::warning::Hay trabajos agotados. Revisa los pedidos en NEEDS_REVIEW."
+              fi
+              exit 0
+            fi
+
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 20))
+          done
+
+          echo "::error::El barrido no respondio 200 tras 3 intentos."
+          echo "Revisa: (1) INTERNAL_TASK_SECRET coincide con el de Render,"
+          echo "        (2) el servicio esta arriba, (3) los logs de Render."
+          exit 1

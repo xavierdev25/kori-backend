@@ -106,14 +106,27 @@ export class StorageService implements OnModuleInit {
     }
   }
 
+  /** Dibujos del muro. Envoltorio sobre uploadImage por compatibilidad. */
   async uploadDrawing(file: Express.Multer.File): Promise<StoredFile> {
+    return this.uploadImage(file, 'drawings');
+  }
+
+  /**
+   * Sube una imagen a una carpeta del bucket. La usan tanto los dibujos del
+   * muro como las fotos de producto del catálogo: mismos formatos, mismo
+   * driver, misma gestión de errores.
+   */
+  async uploadImage(
+    file: Express.Multer.File,
+    folder: string,
+  ): Promise<StoredFile> {
     const extension = this.getExtensionFromMimeType(
       file.mimetype as DrawingMimeType,
     );
-    const storagePath = `drawings/${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${extension}`;
+    const storagePath = `${folder}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}.${extension}`;
 
     if (this.driver === 'local') {
-      return this.uploadDrawingToDisk(file, storagePath);
+      return this.uploadToDisk(file, storagePath);
     }
 
     const { error } = await this.getSupabase()
@@ -175,7 +188,7 @@ export class StorageService implements OnModuleInit {
     }
   }
 
-  private async uploadDrawingToDisk(
+  private async uploadToDisk(
     file: Express.Multer.File,
     storagePath: string,
   ): Promise<StoredFile> {
