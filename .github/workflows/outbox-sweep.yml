@@ -57,12 +57,27 @@ jobs:
             echo "$payload"
             echo "::endgroup::"
 
-            # 404 = el backend desplegado no tiene todavia la cola de trabajos.
-            if [ "$status" = "404" ]; then
-              echo "::warning::El backend desplegado aun no tiene /internal/outbox/run."
-              echo "Despliega el codigo actual y el barrido empezara a funcionar."
-              exit 0
-            fi
+            # Cada codigo dice algo distinto y hay que decirlo, no listar
+            # posibilidades para que el humano adivine cual es.
+            case "$status" in
+              404)
+                echo "::warning::El backend desplegado aun no tiene /internal/outbox/run."
+                echo "Despliega el codigo actual y esto empezara a funcionar."
+                exit 0
+                ;;
+              503)
+                echo "::error::El backend no tiene INTERNAL_TASK_SECRET configurado."
+                echo "Anadelo como variable de entorno en Render (Environment)."
+                echo "Tenerlo solo en los secrets de GitHub no basta: hacen falta los dos."
+                exit 1
+                ;;
+              403)
+                echo "::error::El secreto de GitHub no coincide con el de Render."
+                echo "Genera uno nuevo y ponlo IGUAL en ambos sitios:"
+                echo "  openssl rand -base64 36"
+                exit 1
+                ;;
+            esac
 
             if [ "$rc" -eq 0 ] && [ "$status" = "200" ]; then
               # Un trabajo agotado ya genera su propio correo de alerta, pero
