@@ -85,6 +85,9 @@ jobs:
         with:
           context: .
           push: false
+          # Sin load, buildx deja la imagen en su propio almacen y NO en el
+          # daemon: Trivy no la encuentra y el escaneo no analiza nada.
+          load: true
           tags: kori-backend:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -99,11 +102,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Version fijada, no @master: una accion de seguridad que cambia sola
+      # bajo los pies es justo lo que no quieres en la cadena de suministro.
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: kori-backend:ci
           format: table
+          # Informativo: los CVE de la imagen base de Node aparecen y
+          # desaparecen constantemente y no dependen de nosotros.
           exit-code: "0"
           severity: CRITICAL,HIGH
-        continue-on-error: true
+          # Solo lo que tiene parche disponible; el resto no es accionable.
+          ignore-unfixed: true
+        # Sin continue-on-error a proposito: los hallazgos no bloquean, pero
+        # un escaner que no puede ejecutarse SI tiene que verse en rojo.
+        # Con ambas cosas, el escaneo llevaba tiempo sin analizar nada.
