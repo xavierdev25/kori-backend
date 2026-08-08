@@ -17,6 +17,9 @@ const prisma = new PrismaClient();
 /** Mismo coste que exige el resto del proyecto. */
 const BCRYPT_ROUNDS = 12;
 
+/** Forma de un hash bcrypt: $2b$12$ + 53 caracteres. */
+const BCRYPT_PATTERN = /^\$2[aby]\$\d{2}\$.{53}$/;
+
 /**
  * Precio provisional: 499 MXN. Ponlo bien desde el dashboard antes de
  * publicar — el seed no lo vuelve a tocar si la variante ya existe.
@@ -36,9 +39,21 @@ async function seedAdminUser(): Promise<void> {
   let generatedPassword: string | null = null;
   let passwordHash: string;
 
-  if (existingHash) {
+  if (existingHash && BCRYPT_PATTERN.test(existingHash)) {
     passwordHash = existingHash;
   } else {
+    // Se valida la FORMA del hash, no solo que la variable exista. Antes
+    // bastaba con que estuviera definida, y un .env con el marcador
+    // "<BCRYPT_HASH>" sin rellenar creaba una cuenta con ese texto como
+    // hash: bcrypt.compare fallaba siempre y nadie podia entrar, sin ningun
+    // error visible.
+    if (existingHash) {
+      console.log(
+        '\n  AVISO: ADMIN_PASSWORD_HASH no es un hash bcrypt valido y se ignora.',
+      );
+      console.log('  Se genera una contrasena nueva en su lugar.');
+    }
+
     generatedPassword = randomBytes(18).toString('base64url');
     passwordHash = await bcrypt.hash(generatedPassword, BCRYPT_ROUNDS);
   }
