@@ -56,8 +56,16 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Audit dependencies
-        run: pnpm audit --audit-level=moderate
+      # Bloqueante: lo que de verdad viaja en el contenedor. El Dockerfile
+      # instala con --prod, asi que una vulnerabilidad en jest o eslint no
+      # llega a produccion y no deberia impedir un despliegue.
+      - name: Audit production dependencies
+        run: pnpm audit --audit-level=moderate --prod
+
+      # Informativo: el arbol completo, herramientas de desarrollo incluidas.
+      # No bloquea, pero deja el aviso visible en el log para revisarlo.
+      - name: Audit all dependencies (informativo)
+        run: pnpm audit --audit-level=moderate || true
         continue-on-error: true
 
   docker:

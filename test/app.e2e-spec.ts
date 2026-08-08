@@ -62,7 +62,34 @@ type PrismaMock = {
     findUnique: jest.Mock<Promise<Partial<NoteResponse> | null>, []>;
     delete: jest.Mock<Promise<Partial<NoteResponse>>, []>;
   };
+  // La identidad dejo de vivir en variables de entorno y pasó a la tabla
+  // `users`: sin estos mocks, /auth/login revienta con 500.
+  user: {
+    findUnique: jest.Mock<Promise<AdminUser | null>, [unknown]>;
+  };
+  refreshToken: {
+    create: jest.Mock<Promise<unknown>, [unknown]>;
+    findUnique: jest.Mock<Promise<unknown>, [unknown]>;
+    update: jest.Mock<Promise<unknown>, [unknown]>;
+    updateMany: jest.Mock<Promise<{ count: number }>, [unknown]>;
+  };
+  auditLog: {
+    create: jest.Mock<Promise<unknown>, [unknown]>;
+  };
 };
+
+interface AdminUser {
+  id: string;
+  email: string;
+  passwordHash: string;
+  role: 'ADMIN' | 'ARTIST';
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Correo del usuario con el que se autentican los tests e2e. */
+const ADMIN_EMAIL = 'kori@ejemplo.mx';
 
 type StorageMock = {
   uploadDrawing: jest.Mock<
@@ -101,7 +128,7 @@ describe('Kori backend (e2e)', () => {
       'postgresql://user:pass@localhost:5432/kori?schema=public';
     process.env.NODE_ENV = 'test';
 
-    prismaMock = createPrismaMock();
+    prismaMock = createPrismaMock(bcrypt.hashSync(validPassword, 10));
     storageServiceMock = {
       uploadDrawing: jest.fn<
         Promise<{ imageUrl: string; storagePath: string }>,
@@ -385,7 +412,7 @@ describe('Kori backend (e2e)', () => {
     const response = await request(httpServer)
       .post('/auth/login')
       .send({
-        username: 'kori',
+        email: ADMIN_EMAIL,
         password: validPassword,
       })
       .expect(201);
@@ -401,7 +428,7 @@ describe('Kori backend (e2e)', () => {
   it('POST /auth/login returns no-store Cache-Control', async () => {
     const response = await request(httpServer)
       .post('/auth/login')
-      .send({ username: 'kori', password: validPassword })
+      .send({ email: ADMIN_EMAIL, password: validPassword })
       .expect(201);
 
     expect(response.headers['cache-control']).toBe('no-store');
@@ -410,16 +437,16 @@ describe('Kori backend (e2e)', () => {
   it('POST /auth/login returns 401 for invalid password', async () => {
     const response = await request(httpServer)
       .post('/auth/login')
-      .send({ username: 'kori', password: 'wrong-password' })
+      .send({ email: ADMIN_EMAIL, password: 'wrong-password' })
       .expect(401);
 
     expectErrorEnvelope(response.body, 'UNAUTHORIZED');
   });
 
-  it('POST /auth/login returns 401 for invalid username', async () => {
+  it('POST /auth/login returns 401 for an unknown account', async () => {
     const response = await request(httpServer)
       .post('/auth/login')
-      .send({ username: 'hacker', password: validPassword })
+      .send({ email: 'hacker@ejemplo.mx', password: validPassword })
       .expect(401);
 
     expectErrorEnvelope(response.body, 'UNAUTHORIZED');
@@ -447,7 +474,7 @@ describe('Kori backend (e2e)', () => {
     const loginResponse = await request(httpServer)
       .post('/auth/login')
       .send({
-        username: 'kori',
+        email: ADMIN_EMAIL,
         password: validPassword,
       })
       .expect(201);
@@ -602,8 +629,17 @@ describe('Kori backend (e2e)', () => {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function createPrismaMock(): PrismaMock {
+function createPrismaMock(passwordHash: string): PrismaMock {
   const note = createNote();
+  const adminUser: AdminUser = {
+    id: 'user-e2e',
+    email: ADMIN_EMAIL,
+    passwordHash,
+    role: 'ADMIN',
+    isActive: true,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  };
 
   return {
     $connect: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
@@ -647,6 +683,40 @@ function createPrismaMock(): PrismaMock {
         .fn<Promise<Partial<NoteResponse>>, []>()
         .mockResolvedValue(note),
     },
+    user: {
+      // Sirve tanto al login como a JwtStrategy.validate(), que relee el
+      // usuario en cada peticion autenticada.
+      //
+      // Respeta el filtro `where` como haria Prisma de verdad: devolver
+      // siempre el mismo usuario haria pasar un login con correo equivocado
+      // y contrasena correcta.
+      findUnique: jest
+        .fn<Promise<AdminUser | null>, [unknown]>()
+        .mockImplementation((args) => {
+          const where = (args as { where?: { email?: string; id?: string } })
+            .where;
+
+          const matches =
+            where?.email === undefined
+              ? where?.id === adminUser.id
+              : where.email === adminUser.email;
+
+          return Promise.resolve(matches ? adminUser : null);
+        }),
+    },
+    refreshToken: {
+      create: jest.fn<Promise<unknown>, [unknown]>().mockResolvedValue({}),
+      findUnique: jest
+        .fn<Promise<unknown>, [unknown]>()
+        .mockResolvedValue(null),
+      update: jest.fn<Promise<unknown>, [unknown]>().mockResolvedValue({}),
+      updateMany: jest
+        .fn<Promise<{ count: number }>, [unknown]>()
+        .mockResolvedValue({ count: 0 }),
+    },
+    auditLog: {
+      create: jest.fn<Promise<unknown>, [unknown]>().mockResolvedValue({}),
+    },
   };
 }
 
@@ -679,7 +749,7 @@ async function getAccessToken(
   const response = await request(httpServer)
     .post('/auth/login')
     .send({
-      username: 'kori',
+      email: ADMIN_EMAIL,
       password,
     })
     .expect(201);
