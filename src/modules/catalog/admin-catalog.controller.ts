@@ -20,6 +20,7 @@ import {
   ALLOWED_PRODUCT_IMAGE_MIME_TYPES,
   MAX_PRODUCT_IMAGE_SIZE_BYTES,
 } from '../../common/constants/product.constants';
+import { MAX_DIGITAL_ASSET_BYTES } from '../../common/constants/digital.constants';
 import { NoCacheInterceptor } from '../../common/interceptors/no-cache.interceptor';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -37,6 +38,7 @@ import {
   UpdateProductDto,
   UpdateVariantDto,
 } from './dto/product.dto';
+import { ProductDigitalAssetService } from './digital-asset.service';
 import { ProductImagesService } from './product-images.service';
 
 /**
@@ -49,6 +51,7 @@ import { ProductImagesService } from './product-images.service';
 @UseInterceptors(NoCacheInterceptor)
 export class AdminCatalogController {
   constructor(
+    private readonly digitalAssetService: ProductDigitalAssetService,
     private readonly catalogService: CatalogService,
     private readonly productImagesService: ProductImagesService,
   ) {}
@@ -185,5 +188,46 @@ export class AdminCatalogController {
     @Param('imageId', ParseUUIDPipe) imageId: string,
   ) {
     return this.productImagesService.deleteImage(productId, imageId);
+  }
+
+  /**
+   * El archivo que se vende. Es el equivalente digital del archivo de
+   * impresión: sin él no se puede publicar ni cobrar.
+   *
+   * Va a memoria y de ahí al bucket. Un drumkit de 80 MB en el contenedor de
+   * Render (512 MB) cabe de sobra; el tope de 500 MB es el techo duro antes
+   * de que empiece a ser un problema de memoria y no de negocio.
+   */
+  @Post(':id/variants/:variantId/asset')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fieldNameSize: 100,
+        fields: 1,
+        fileSize: MAX_DIGITAL_ASSET_BYTES,
+        files: 1,
+        parts: 2,
+      },
+      storage: memoryStorage(),
+    }),
+  )
+  uploadDigitalAsset(
+    @Param('id', ParseUUIDPipe) productId: string,
+    @Param('variantId', ParseUUIDPipe) variantId: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Falta el archivo');
+    }
+
+    return this.digitalAssetService.upload(productId, variantId, file);
+  }
+
+  @Delete(':id/variants/:variantId/asset')
+  removeDigitalAsset(
+    @Param('id', ParseUUIDPipe) productId: string,
+    @Param('variantId', ParseUUIDPipe) variantId: string,
+  ) {
+    return this.digitalAssetService.remove(productId, variantId);
   }
 }

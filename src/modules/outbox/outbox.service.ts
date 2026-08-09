@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OutboxJobType, Prisma } from '@prisma/client';
 
 import { OrderEmailsService } from '../notifications/order-emails.service';
+import {
+  DOWNLOAD_GRANT_MAX_USES,
+  DOWNLOAD_GRANT_TTL_HOURS,
+} from '../../common/constants/digital.constants';
+import { DigitalDeliveryService } from '../orders/digital-delivery.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Cuántos trabajos se toman por pasada. */
@@ -28,6 +33,7 @@ export class OutboxService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly orderEmailsService: OrderEmailsService,
+    private readonly digitalDeliveryService: DigitalDeliveryService,
   ) {}
 
   /**
@@ -161,6 +167,43 @@ export class OutboxService {
           },
         });
         break;
+
+      case 'DELIVER_DIGITAL': {
+        // El equivalente digital de FULFILL_ORDER. No pasa por
+        // IN_PRODUCTION: un drumkit no se produce, se entrega.
+        const enlaces = await this.digitalDeliveryService.emitirEnlaces(order);
+
+        if (enlaces.length === 0) {
+          // Pagado y sin nada que entregar. Que reviente el trabajo es lo
+          // correcto: acabará en NEEDS_REVIEW con aviso al admin, en vez de
+          // dejar al comprador esperando un correo que no existe.
+          throw new Error(
+            `El pedido ${orderId} no tiene archivos que entregar`,
+          );
+        }
+
+        await this.orderEmailsService.sendDownloadLinks(
+          order,
+          enlaces,
+          DOWNLOAD_GRANT_TTL_HOURS,
+          DOWNLOAD_GRANT_MAX_USES,
+        );
+
+        await this.prismaService.order.update({
+          data: {
+            events: {
+              create: {
+                note: `Enlaces de descarga enviados (${enlaces.length})`,
+                status: 'DELIVERED',
+              },
+            },
+            fulfillmentSubmittedAt: new Date(),
+            status: 'DELIVERED',
+          },
+          where: { id: orderId },
+        });
+        break;
+      }
 
       case 'SEND_ADMIN_ALERT':
         await this.orderEmailsService.sendAdminAlert(

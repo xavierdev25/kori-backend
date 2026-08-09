@@ -97,11 +97,44 @@ export class CatalogService {
   }
 
   async createProduct(dto: CreateProductDto) {
+    const { priceCents, ...producto } = dto;
+
+    // Un producto digital lleva una sola variante y el panel no la enseña:
+    // un drumkit no tiene tallas. Se crea aquí para que publicar no obligue a
+    // inventarse una "talla única" a mano, que es lo que exigiría la
+    // validación de publicación.
+    const esDigital = producto.fulfillmentType === 'DIGITAL';
+
+    if (esDigital && !priceCents) {
+      throw new ConflictException(
+        'Un producto digital necesita su precio al crearlo',
+      );
+    }
+
     try {
-      return await this.prismaService.product.create({ data: { ...dto } });
+      return await this.prismaService.product.create({
+        data: {
+          ...producto,
+          ...(esDigital && priceCents
+            ? {
+                variants: {
+                  create: {
+                    label: 'Descarga',
+                    priceCents,
+                    // El slug ya es único, así que sirve de SKU sin pedirle
+                    // a nadie que se invente otro identificador.
+                    sku: producto.slug.toUpperCase(),
+                  },
+                },
+              }
+            : {}),
+        },
+        include: { variants: true },
+      });
     } catch (error) {
       this.rethrowUniqueViolation(error, {
-        slug: `Ya existe un producto con el slug "${dto.slug}"`,
+        sku: `Ya existe una variante con el SKU "${producto.slug.toUpperCase()}"`,
+        slug: `Ya existe un producto con el slug "${producto.slug}"`,
       });
       throw error;
     }

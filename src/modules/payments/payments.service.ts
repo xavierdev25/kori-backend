@@ -131,6 +131,14 @@ export class PaymentsService {
       // El trabajo pesado no se hace aquí: se encola. El webhook tiene que
       // responder 200 rápido, y la cola vive en Postgres para sobrevivir a que
       // el contenedor se duerma.
+      // Un pedido de puras descargas no se "produce": se entrega. Son dos
+      // trabajos distintos porque acaban en estados distintos y fallan por
+      // motivos distintos.
+      const soloDigital =
+        order.items.length > 0 &&
+        order.items.every((item) => item.fulfillmentType === 'DIGITAL');
+      const entrega = soloDigital ? 'DELIVER_DIGITAL' : 'FULFILL_ORDER';
+
       await tx.outboxJob.createMany({
         data: [
           {
@@ -140,8 +148,8 @@ export class PaymentsService {
             orderId,
           },
           {
-            type: 'FULFILL_ORDER',
-            dedupeKey: `FULFILL_ORDER:${orderId}`,
+            type: entrega,
+            dedupeKey: `${entrega}:${orderId}`,
             payload: { orderId },
             orderId,
           },
@@ -151,7 +159,7 @@ export class PaymentsService {
       });
     });
 
-    this.logger.log(`Pedido ${orderId} pagado y encolado para producción`);
+    this.logger.log(`Pedido ${orderId} pagado y encolado para entrega`);
   }
 
   /** La sesión caducó sin pagar: el pedido pendiente deja de tener sentido. */

@@ -51,6 +51,36 @@ export class OrderEmailsService {
     });
   }
 
+  /**
+   * Los enlaces de descarga de un pedido digital ya pagado.
+   *
+   * Se dice cuánto duran y cuántas veces sirven. Quien compra a las 3 de la
+   * mañana y lo abre tres días después necesita saber por qué ya no funciona,
+   * y a quién escribirle.
+   */
+  async sendDownloadLinks(
+    order: OrderWithItems,
+    enlaces: { nombre: string; url: string }[],
+    horasDeCaducidad: number,
+    descargasMaximas: number,
+  ): Promise<void> {
+    const lista = enlaces
+      .map((enlace) => `  · ${enlace.nombre}\n    ${enlace.url}`)
+      .join('\n\n');
+
+    await this.emailService.send({
+      subject: `Tu descarga de Kori — pedido #${order.orderNumber}`,
+      text:
+        `Gracias por tu compra.\n\n` +
+        `Aquí están tus archivos:\n\n${lista}\n\n` +
+        `Los enlaces caducan en ${horasDeCaducidad} horas y sirven para ` +
+        `${descargasMaximas} descargas.\n` +
+        `Si se te pasa el plazo, escríbenos y te mandamos unos nuevos.\n\n` +
+        `— Kori`,
+      to: order.customerEmail,
+    });
+  }
+
   /** Pedido pagado que hay que colocar a mano en el proveedor. */
   async sendManualFulfillmentRequest(order: OrderWithItems): Promise<void> {
     const lines = order.items.map(

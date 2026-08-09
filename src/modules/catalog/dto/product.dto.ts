@@ -52,6 +52,21 @@ export class CreateProductDto {
   @IsOptional()
   @IsEnum(FulfillmentType)
   fulfillmentType?: FulfillmentType;
+
+  /**
+   * Precio, solo para productos digitales.
+   *
+   * Un drumkit no tiene tallas ni colores: tiene un precio y ya. Dándolo aquí,
+   * el sistema le crea sola su variante única y quien administra no tiene que
+   * inventarse una talla para poder publicar. Para el merch se ignora: ahí
+   * cada talla lleva el suyo.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100_000_000)
+  priceCents?: number;
 }
 
 export class UpdateProductDto {
