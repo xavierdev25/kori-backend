@@ -1,0 +1,201 @@
+import { Readable } from 'stream';
+
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
+
+/**
+ * El almacén de los archivos que se venden: drumkits, presets, lo que venga.
+ *
+ * Separado de `StorageService` a propósito. Aquel guarda imágenes públicas de
+ * notas y productos en Supabase; este guarda producto de pago en un bucket
+ * privado del que solo se sale por un enlace firmado que caduca. Mezclarlos
+ * acabaría con alguien sirviendo un drumkit desde una URL pública.
+ *
+ * Habla S3 genérico y no la API propia de ningún proveedor. Hoy apunta a
+ * Backblaze B2; si mañana funciona Cloudflare R2, o cualquier otro, se cambian
+ * las variables de entorno y no se toca una línea de código.
+ *
+ * Es opcional al arrancar, igual que Stripe y Resend: sin credenciales el
+ * backend levanta y avisa, y solo falla lo que de verdad necesita el bucket.
+ */
+
+/** Lo que se acepta subir. Un ejecutable en la tienda no tiene explicación. */
+const ALLOWED_MIME_TYPES = [
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/octet-stream',
+];
+
+/** 500 MB. Muy por encima de lo que pesa un drumkit, y aun así un techo. */
+const MAX_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Cuánto vive la URL firmada que se entrega al navegador.
+ *
+ * Corta a propósito: es el último salto, el que ocurre cuando alguien ya
+ * pulsó su enlace de descarga y se validó su permiso. Lo que caduca en 72
+ * horas es el enlace del correo, no esto.
+ */
+const SIGNED_URL_TTL_SECONDS = 60;
+
+export interface StoredAsset {
+  bytes: number;
+  path: string;
+}
+
+@Injectable()
+export class DigitalAssetsService implements OnModuleInit {
+  private readonly logger = new Logger(DigitalAssetsService.name);
+  private readonly client: S3Client | null;
+  private readonly bucket: string;
+
+  constructor(private readonly configService: ConfigService) {
+    const endpoint = this.configService.get<string>('S3_ENDPOINT');
+    const accessKeyId = this.configService.get<string>('S3_ACCESS_KEY_ID');
+    const secretAccessKey = this.configService.get<string>(
+      'S3_SECRET_ACCESS_KEY',
+    );
+    this.bucket = this.configService.get<string>('S3_BUCKET') ?? '';
+
+    if (!endpoint || !accessKeyId || !secretAccessKey || !this.bucket) {
+      this.client = null;
+      return;
+    }
+
+    this.client = new S3Client({
+      credentials: { accessKeyId, secretAccessKey },
+      endpoint,
+      // B2 y R2 solo entienden rutas del tipo `endpoint/bucket/clave`. Sin
+      // esto el SDK usa el estilo de AWS (`bucket.endpoint/clave`) y falla.
+      forcePathStyle: true,
+      region: this.configService.get<string>('S3_REGION') ?? 'auto',
+    });
+  }
+
+  async onModuleInit(): Promise<void> {
+    if (!this.client) {
+      this.logger.warn(
+        'S3_* sin definir: la venta de productos digitales responderá 503. El resto del backend funciona.',
+      );
+      return;
+    }
+
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+      this.logger.log(`Almacén de archivos conectado. Bucket "${this.bucket}"`);
+    } catch (error) {
+      // Se avisa y se sigue. Que el almacén esté caído no puede impedir que
+      // arranque el backend entero: los pedidos y el webhook de Stripe no
+      // tienen nada que ver con esto.
+      this.logger.error(
+        `No se pudo conectar con el bucket "${this.bucket}": ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  get isConfigured(): boolean {
+    return this.client !== null;
+  }
+
+  /**
+   * Sube el archivo de una variante y devuelve su ruta interna.
+   *
+   * El nombre se genera aquí y no se toma del archivo: un nombre de usuario
+   * puede traer rutas relativas, y además el nombre original no aporta nada
+   * cuando lo que importa es a qué variante pertenece.
+   */
+  async upload(
+    variantId: string,
+    file: { buffer: Buffer; mimetype: string; originalname: string },
+  ): Promise<StoredAsset> {
+    const client = this.requireClient();
+
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      throw new ServiceUnavailableException(
+        'Formato no permitido. Sube el kit comprimido en .zip',
+      );
+    }
+
+    if (file.buffer.byteLength > MAX_BYTES) {
+      throw new ServiceUnavailableException(
+        `El archivo pesa más de ${MAX_BYTES / 1024 / 1024} MB`,
+      );
+    }
+
+    const path = `variants/${variantId}/${randomUUID()}.zip`;
+
+    await client.send(
+      new PutObjectCommand({
+        Body: file.buffer,
+        Bucket: this.bucket,
+        ContentType: 'application/zip',
+        Key: path,
+      }),
+    );
+
+    return { bytes: file.buffer.byteLength, path };
+  }
+
+  /**
+   * Una URL temporal para descargar. Solo debe llamarse después de haber
+   * validado el permiso de quien la pide.
+   */
+  async getSignedUrl(path: string, filename: string): Promise<string> {
+    const client = this.requireClient();
+
+    return getSignedUrl(
+      client,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: path,
+        // Fuerza la descarga con un nombre legible en vez de abrir el UUID.
+        ResponseContentDisposition: `attachment; filename="${filename.replace(/"/g, '')}"`,
+      }),
+      { expiresIn: SIGNED_URL_TTL_SECONDS },
+    );
+  }
+
+  /** Lee el archivo. Solo para el caso en que se sirva a través del backend. */
+  async getStream(path: string): Promise<Readable> {
+    const client = this.requireClient();
+    const result = await client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: path }),
+    );
+
+    return result.Body as Readable;
+  }
+
+  async remove(path: string): Promise<void> {
+    const client = this.requireClient();
+
+    await client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: path }),
+    );
+  }
+
+  private requireClient(): S3Client {
+    if (!this.client) {
+      throw new ServiceUnavailableException(
+        'El almacén de archivos no está configurado',
+      );
+    }
+
+    return this.client;
+  }
+}

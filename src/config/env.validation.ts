@@ -94,6 +94,41 @@ export function validateEnvironment(
     errors.push('JWT_ACCESS_SECRET must be at least 32 characters long');
   }
 
+  // Almacén de archivos digitales (S3 genérico: Backblaze B2, Cloudflare R2…).
+  // Opcional, igual que Stripe. Pero o están todas o no está ninguna: media
+  // configuración es peor que ninguna, porque el fallo aparece al subir el
+  // primer drumkit y no al arrancar.
+  const s3Keys = [
+    'S3_ENDPOINT',
+    'S3_ACCESS_KEY_ID',
+    'S3_SECRET_ACCESS_KEY',
+    'S3_BUCKET',
+  ];
+  const s3Present = s3Keys.filter((key) => Boolean(config[key]));
+
+  if (s3Present.length > 0 && s3Present.length < s3Keys.length) {
+    const missing = s3Keys.filter((key) => !config[key]);
+
+    errors.push(
+      `Digital asset storage is half-configured: missing ${missing.join(', ')}. Set all of them or none.`,
+    );
+  }
+
+  const s3Endpoint = config['S3_ENDPOINT'] as string | undefined;
+
+  if (s3Endpoint) {
+    try {
+      const url = new URL(s3Endpoint);
+
+      if (url.protocol !== 'https:') {
+        // Las credenciales del bucket viajan en cada petición.
+        errors.push('S3_ENDPOINT must use https');
+      }
+    } catch {
+      errors.push('S3_ENDPOINT must be a valid URL');
+    }
+  }
+
   // Stripe. Opcionales a propósito: sin ellas el checkout responde 503 y el
   // resto del backend (muro de notitas, panel) sigue funcionando. Así se puede
   // desplegar la tienda antes de tener la cuenta de Stripe lista.
