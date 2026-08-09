@@ -18,6 +18,7 @@ describe('OrdersService', () => {
       aggregate: jest.Mock;
     };
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
   };
   let service: OrdersService;
 
@@ -34,6 +35,7 @@ describe('OrdersService', () => {
         }),
       },
       $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
 
     service = new OrdersService(prisma as unknown as PrismaService);
@@ -209,6 +211,92 @@ describe('OrdersService', () => {
       // Un panel que esconde los estados vacíos hace creer que no existen.
       expect(stats.countByStatus.CANCELLED).toBe(0);
       expect(Object.keys(stats.countByStatus)).toHaveLength(8);
+    });
+  });
+
+  describe('serie diaria', () => {
+    /** Una fila tal como la devuelve Postgres: fecha a medianoche UTC. */
+    function fila(dia: string, ventas: number, centavos: number) {
+      return {
+        day: new Date(`${dia}T00:00:00Z`),
+        salesCount: BigInt(ventas),
+        grossRevenueCents: BigInt(centavos),
+      };
+    }
+
+    it('rellena con ceros los dias sin ventas', async () => {
+      prisma.$queryRaw.mockResolvedValue([
+        fila('2026-08-01', 2, 119800),
+        fila('2026-08-04', 1, 59900),
+      ]);
+
+      const serie = await service.getSalesTimeseries({
+        from: '2026-08-01',
+        to: '2026-08-05',
+      });
+
+      // Sin relleno, la grafica uniria el dia 1 con el 4 en linea recta y
+      // dibujaria actividad donde no la hubo.
+      expect(serie.days.map((d) => d.date)).toEqual([
+        '2026-08-01',
+        '2026-08-02',
+        '2026-08-03',
+        '2026-08-04',
+        '2026-08-05',
+      ]);
+      expect(serie.days[1]).toEqual({
+        date: '2026-08-02',
+        grossRevenueCents: 0,
+        salesCount: 0,
+      });
+    });
+
+    it('convierte los bigint de Postgres a numeros', async () => {
+      prisma.$queryRaw.mockResolvedValue([fila('2026-08-01', 2, 119800)]);
+
+      const serie = await service.getSalesTimeseries({
+        from: '2026-08-01',
+        to: '2026-08-01',
+      });
+
+      expect(serie.days[0].grossRevenueCents).toBe(119800);
+      expect(typeof serie.days[0].salesCount).toBe('number');
+    });
+
+    it('una fecha suelta se respeta tal cual, sin correrse un dia', async () => {
+      const serie = await service.getSalesTimeseries({
+        from: '2026-08-01',
+        to: '2026-08-03',
+      });
+
+      // `new Date("2026-08-01")` es medianoche UTC, que en Mexico todavia es
+      // el 31 de julio: si se convirtiera, sobraria un dia por delante.
+      expect(serie.days[0].date).toBe('2026-08-01');
+      expect(serie.days).toHaveLength(3);
+    });
+
+    it('declara la zona horaria con la que corta los dias', async () => {
+      const serie = await service.getSalesTimeseries({});
+
+      // El panel necesita poder decir en que hora esta leyendo la grafica.
+      expect(serie.timeZone).toBe('America/Mexico_City');
+      expect(serie.currency).toBe('MXN');
+    });
+
+    it('solo suma los estados que cuentan como venta cerrada', async () => {
+      await service.getSalesTimeseries({});
+
+      // Una plantilla etiquetada llega como (trozos, ...valores). Nada de
+      // `.flat()` aqui: aplanaria justo el array de estados que se busca.
+      const sql = prisma.$queryRaw.mock.calls[0] as unknown[];
+      const estados = sql.slice(1).find((v) => Array.isArray(v)) as string[];
+
+      expect(estados).toEqual(
+        expect.arrayContaining(['PAID', 'NEEDS_REVIEW', 'DELIVERED']),
+      );
+      // Nadie pago: no es una venta.
+      expect(estados).not.toContain('PENDING_PAYMENT');
+      expect(estados).not.toContain('REFUNDED');
     });
   });
 });

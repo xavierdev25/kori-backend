@@ -27,6 +27,9 @@ const SOLD_STATUSES: OrderStatus[] = [
 const STRIPE_PERCENTAGE_FEE = 0.036;
 const STRIPE_FIXED_FEE_CENTS = 300;
 
+/** La tienda vende solo en México: los días se cortan en su hora. */
+const TIENDA_TIMEZONE = 'America/Mexico_City';
+
 @Injectable()
 export class OrdersService {
   constructor(private readonly prismaService: PrismaService) {}
@@ -164,6 +167,123 @@ export class OrdersService {
         excludesProductionCost: true,
       },
     };
+  }
+
+  /**
+   * Ventas por día, para la gráfica del panel.
+   *
+   * El agregado se hace aquí y no en el navegador por lo mismo que el resto
+   * del dinero: el panel solo pagina veinte pedidos, así que sumar en el
+   * cliente daría una curva construida con la página que toque mirar.
+   *
+   * Los días se cortan en hora de México y no en UTC. Es una tienda que
+   * vende solo en México: una venta de las 19:00 del día 8 en CDMX es del
+   * día 8, y en UTC aparecería como del 9. En un filtro de rango eso casi no
+   * se nota; en una gráfica diaria se ve, porque mueve las barras de sitio.
+   */
+  async getSalesTimeseries(query: AdminOrdersQueryDto) {
+    // El rango se maneja como días de calendario de la tienda, no como
+    // instantes. Es lo que pide una gráfica diaria, y de paso evita el lío de
+    // convertir "principio del día 1 en CDMX" a un instante UTC.
+    const desde =
+      this.asPlainDate(query.from) ??
+      // Por defecto, los últimos 30 días.
+      this.toStoreDate(new Date(Date.now() - 29 * 24 * 60 * 60 * 1000));
+    const hasta = this.asPlainDate(query.to) ?? this.toStoreDate(new Date());
+
+    // `created_at` es `timestamp without time zone` y guarda UTC, así que la
+    // conversión lleva dos pasos. Sin el `AT TIME ZONE 'UTC'` de delante, el
+    // segundo *interpreta* la marca como hora de México en vez de
+    // convertirla, y una venta de las 22:00 del día 7 en CDMX acaba contada
+    // en el día 8: justo el error que esta función existe para evitar.
+    //
+    // Filtrar por el día ya convertido, y no por el instante, quita además la
+    // dependencia de la zona horaria de la sesión de Postgres, que cambia
+    // según dónde corra la base.
+    const rows = await this.prismaService.$queryRaw<
+      { day: Date; salesCount: bigint; grossRevenueCents: bigint }[]
+    >`
+      SELECT
+        (created_at AT TIME ZONE 'UTC' AT TIME ZONE ${TIENDA_TIMEZONE})::date AS "day",
+        COUNT(*) AS "salesCount",
+        COALESCE(SUM(total_cents), 0) AS "grossRevenueCents"
+      FROM orders
+      WHERE status = ANY(${SOLD_STATUSES}::"OrderStatus"[])
+        AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE ${TIENDA_TIMEZONE})::date
+              BETWEEN ${desde}::date AND ${hasta}::date
+      GROUP BY "day"
+      ORDER BY "day"
+    `;
+
+    // `row.day` es una fecha de calendario: el driver la entrega como Date a
+    // medianoche UTC, así que se lee en UTC sin más conversiones.
+    const porDia = new Map(
+      rows.map((row) => [
+        row.day.toISOString().slice(0, 10),
+        {
+          grossRevenueCents: Number(row.grossRevenueCents),
+          salesCount: Number(row.salesCount),
+        },
+      ]),
+    );
+
+    // Los días sin ventas se rellenan con ceros. Si se omiten, la gráfica
+    // une el día 3 con el día 9 en una línea recta y parece que hubo
+    // actividad continua donde no la hubo.
+    const dias: {
+      date: string;
+      grossRevenueCents: number;
+      salesCount: number;
+    }[] = [];
+    const ultimo = hasta;
+    const cursor = new Date(`${desde}T00:00:00Z`);
+
+    while (cursor.toISOString().slice(0, 10) <= ultimo) {
+      const date = cursor.toISOString().slice(0, 10);
+
+      dias.push({
+        date,
+        grossRevenueCents: porDia.get(date)?.grossRevenueCents ?? 0,
+        salesCount: porDia.get(date)?.salesCount ?? 0,
+      });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return { currency: 'MXN', days: dias, timeZone: TIENDA_TIMEZONE };
+  }
+
+  /**
+   * El día de calendario al que pertenece un instante, en hora de la tienda.
+   *
+   * Con `toISOString()` bastaría si todo fuera UTC, pero entonces "hoy" a las
+   * 21:00 de CDMX ya sería mañana y la gráfica cerraría con un día vacío de
+   * relleno. `en-CA` se usa porque da el formato AAAA-MM-DD directamente.
+   */
+  private toStoreDate(value: Date): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      day: '2-digit',
+      month: '2-digit',
+      timeZone: TIENDA_TIMEZONE,
+      year: 'numeric',
+    }).format(value);
+  }
+
+  /**
+   * Una fecha suelta ("2026-08-01") se toma tal cual, sin pasarla por `Date`.
+   *
+   * Si se convierte, JS la lee como medianoche UTC, que en México todavía es
+   * el día anterior, y la gráfica arrancaba con un 31 de julio vacío que
+   * nadie había pedido. Cuando viene un instante completo sí se convierte,
+   * porque ahí sí hay una hora que situar.
+   */
+  private asPlainDate(value?: string): string | null {
+    if (!value) {
+      return null;
+    }
+
+    return /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? value
+      : this.toStoreDate(new Date(value));
   }
 
   private buildWhere(query: AdminOrdersQueryDto): Prisma.OrderWhereInput {

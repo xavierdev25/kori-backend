@@ -53,4 +53,10 @@ export class AdminStatsController {
   getStats(@Query() query: AdminOrdersQueryDto) {
     return this.ordersService.getStats(query);
   }
+
+  /** Serie diaria para la gráfica. Sigue siendo solo lectura y solo ADMIN. */
+  @Get('timeseries')
+  getSalesTimeseries(@Query() query: AdminOrdersQueryDto) {
+    return this.ordersService.getSalesTimeseries(query);
+  }
 }
