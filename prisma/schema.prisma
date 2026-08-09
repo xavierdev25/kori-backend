@@ -9,31 +9,31 @@ datasource db {
 }
 
 model Note {
-  id            String     @id @default(uuid())
-  type          NoteType
-  status        NoteStatus @default(PENDING)
+  id     String     @id @default(uuid())
+  type   NoteType
+  status NoteStatus @default(PENDING)
 
-  recipientName String   @map("recipient_name")
+  recipientName String  @map("recipient_name")
   message       String?
-  imageUrl      String?  @map("image_url")
-  storagePath   String?  @map("storage_path")
+  imageUrl      String? @map("image_url")
+  storagePath   String? @map("storage_path")
 
-  color         String?
-  rotation      Int
+  color    String?
+  rotation Int
 
   /// Legado: la landing calcula la posicion con su propio layout y estas
   /// columnas ya no viajan en la API. Se conservan (NOT NULL + CHECK) para
   /// no migrar la tabla en produccion; se siguen escribiendo con un valor
   /// aleatorio valido al crear la nota.
-  positionX     Int      @map("position_x")
-  positionY     Int      @map("position_y")
+  positionX Int @map("position_x")
+  positionY Int @map("position_y")
 
-  zIndex        Int      @map("z_index")
+  zIndex Int @map("z_index")
 
-  ipHash        String?  @map("ip_hash")
-  userAgentHash String?  @map("user_agent_hash")
+  ipHash        String? @map("ip_hash")
+  userAgentHash String? @map("user_agent_hash")
 
-  createdAt     DateTime @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@index([createdAt])
   @@index([type, createdAt])
@@ -178,6 +178,15 @@ model ProductVariant {
   /// El providerProductUid describe la prenda; esto es el diseño.
   printFileUrl String? @map("print_file_url")
 
+  /// Ruta del archivo en el bucket PRIVADO. Solo para variantes DIGITAL.
+  /// Nunca se expone al público: se entrega mediante un enlace firmado y
+  /// temporal, y por eso aquí se guarda la ruta y no una URL.
+  digitalAssetPath String? @map("digital_asset_path")
+
+  /// Peso del archivo, para poder enseñarlo en la tienda ("80 MB") sin
+  /// tener que ir a preguntarle al almacenamiento en cada visita.
+  digitalAssetBytes Int? @map("digital_asset_bytes")
+
   isActive  Boolean  @default(true) @map("is_active")
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
@@ -244,7 +253,7 @@ model ShippingQuote {
 
   /// Respuesta cruda del proveedor, para poder abrir casos de soporte.
   providerPayload Json     @map("provider_payload")
-  expiresAt     DateTime @map("expires_at")
+  expiresAt       DateTime @map("expires_at")
 
   /// De un solo uso: se marca al crear la sesión de checkout.
   consumedAt DateTime? @map("consumed_at")
@@ -330,9 +339,9 @@ model Order {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  items        OrderItem[]
-  events       OrderEvent[]
-  jobs         OutboxJob[]
+  items             OrderItem[]
+  events            OrderEvent[]
+  jobs              OutboxJob[]
   fulfillmentOrders FulfillmentOrder[]
 
   @@index([status])
@@ -355,15 +364,22 @@ model OrderItem {
   // ── Copia congelada al momento de la venta. ─────────────────────
   // El historial se lee SIEMPRE de aquí. Si el precio cambia mañana,
   // las ventas de ayer no cambian.
-  productName      String          @map("product_name")
-  variantLabel     String          @map("variant_label")
-  sku              String
-  unitPriceCents   Int             @map("unit_price_cents")
-  quantity         Int
-  lineTotalCents   Int             @map("line_total_cents")
+  productName        String          @map("product_name")
+  variantLabel       String          @map("variant_label")
+  sku                String
+  unitPriceCents     Int             @map("unit_price_cents")
+  quantity           Int
+  lineTotalCents     Int             @map("line_total_cents")
   providerProductUid String?         @map("provider_product_uid")
-  printFileUrl     String?         @map("print_file_url")
-  fulfillmentType  FulfillmentType @map("fulfillment_type")
+  printFileUrl       String?         @map("print_file_url")
+  /// El archivo que se compró. Congelado como todo lo demás: si mañana
+  /// subes una versión nueva del drumkit, quien pagó ayer sigue bajando
+  /// exactamente lo que pagó.
+  digitalAssetPath   String?         @map("digital_asset_path")
+  fulfillmentType    FulfillmentType @map("fulfillment_type")
+
+  /// Permisos de descarga emitidos para esta línea.
+  downloadGrants DownloadGrant[]
 
   @@index([orderId])
   @@index([productVariantId])
@@ -446,8 +462,42 @@ model WebhookEvent {
   @@map("webhook_events")
 }
 
+/// El permiso para descargar una compra digital.
+///
+/// Se emite al confirmarse el pago, uno por línea del pedido. El token en
+/// claro solo existe en el correo del comprador: aquí se guarda su SHA-256,
+/// igual que con los refresh tokens. Quien lea la base de datos no puede
+/// descargar nada de nadie.
+model DownloadGrant {
+  id          String    @id @default(uuid())
+  orderItemId String    @map("order_item_id")
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  tokenHash String @unique @map("token_hash")
+
+  /// Caducidad y tope de descargas. Un enlace eterno acaba circulando por
+  /// Telegram; uno de un solo uso deja tirado a quien se le corte la
+  /// descarga. 72 horas y 5 intentos es el punto medio.
+  expiresAt      DateTime  @map("expires_at")
+  maxDownloads   Int       @default(5) @map("max_downloads")
+  downloadCount  Int       @default(0) @map("download_count")
+  lastDownloadAt DateTime? @map("last_download_at")
+
+  /// Para poder reemitir desde el panel sin perder el rastro del anterior.
+  revokedAt DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([orderItemId])
+  @@index([expiresAt])
+  @@map("download_grants")
+}
+
 enum OutboxJobType {
   FULFILL_ORDER
+  /// Emite los enlaces de descarga y los manda por correo. El equivalente
+  /// digital de FULFILL_ORDER: un pedido de drumkits no se "produce".
+  DELIVER_DIGITAL
   SEND_ORDER_CONFIRMATION
   SEND_SHIPPING_NOTIFICATION
   SEND_ADMIN_ALERT
@@ -491,6 +541,7 @@ model OutboxJob {
   @@index([orderId])
   @@map("outbox_jobs")
 }
+
 /// Quien cambio que en el panel.
 ///
 /// Es un sistema que mueve dinero: cuando un precio aparece cambiado o un

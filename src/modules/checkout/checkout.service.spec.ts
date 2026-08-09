@@ -1,8 +1,10 @@
 import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
+import { UnprocessableEntityException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from '../payments/stripe.service';
+import { STORE_CURRENCY } from '../../common/money/currency';
 import { CheckoutService } from './checkout.service';
 
 describe('CheckoutService', () => {
@@ -90,7 +92,9 @@ describe('CheckoutService', () => {
       }>(sessionsCreate);
 
       expect(params.line_items[0].price_data.unit_amount).toBe(59_900);
-      expect(params.line_items[0].price_data.currency).toBe('mxn');
+      expect(params.line_items[0].price_data.currency).toBe(
+        STORE_CURRENCY.toLowerCase(),
+      );
     });
 
     it('suma cantidades de la misma variante en una sola línea', async () => {
@@ -233,6 +237,96 @@ describe('CheckoutService', () => {
       expect(
         callArg<Record<string, unknown>>(sessionsCreate).shipping_options,
       ).toBeUndefined();
+    });
+  });
+
+  describe('un pedido de descargas no se envía a ninguna parte', () => {
+    const digital = (overrides: Record<string, unknown> = {}) =>
+      variant({
+        digitalAssetPath: 'drumkits/diciembre.zip',
+        printFileUrl: null,
+        product: {
+          fulfillmentType: 'DIGITAL',
+          isActive: true,
+          name: 'DICIEMBRE (drumkit)',
+        },
+        providerProductUid: null,
+        sku: 'KORI-DK-DIC',
+        ...overrides,
+      });
+
+    it('no le pide la dirección al comprador', async () => {
+      prisma.productVariant.findMany.mockResolvedValue([digital()]);
+
+      await service.createSession({
+        items: [{ quantity: 1, variantId: 'v1' }],
+      });
+
+      const params = callArg<Record<string, unknown>>(sessionsCreate);
+
+      // Pedir dirección para un archivo es fricción gratis; y limitarla a
+      // México le impediría pagar a cualquiera de fuera.
+      expect(params.shipping_address_collection).toBeUndefined();
+    });
+
+    it('no cobra envío aunque haya tarifa configurada', async () => {
+      prisma.productVariant.findMany.mockResolvedValue([digital()]);
+      prisma.appSetting.findUnique.mockResolvedValue({ value: '15000' });
+
+      await service.createSession({
+        items: [{ quantity: 1, variantId: 'v1' }],
+      });
+
+      const data = orderData();
+      expect(data.shippingCents).toBe(0);
+      expect(data.totalCents).toBe(data.subtotalCents);
+    });
+
+    it('congela el archivo comprado en la línea del pedido', async () => {
+      prisma.productVariant.findMany.mockResolvedValue([digital()]);
+
+      await service.createSession({
+        items: [{ quantity: 1, variantId: 'v1' }],
+      });
+
+      const data = callArg<{
+        data: { items: { create: { digitalAssetPath: string }[] } };
+      }>(prisma.order.create).data;
+
+      // Si mañana se sube una versión nueva del kit, quien pagó ayer sigue
+      // bajando la que compró.
+      expect(data.items.create[0].digitalAssetPath).toBe(
+        'drumkits/diciembre.zip',
+      );
+    });
+
+    it('no se cobra un digital sin archivo subido', async () => {
+      prisma.productVariant.findMany.mockResolvedValue([
+        digital({ digitalAssetPath: null }),
+      ]);
+
+      // Cobrar por un archivo que no existe deja al comprador esperando un
+      // correo que no va a llegar nunca.
+      await expect(
+        service.createSession({ items: [{ quantity: 1, variantId: 'v1' }] }),
+      ).rejects.toThrow(UnprocessableEntityException);
+    });
+
+    it('si el carrito mezcla descarga y playera, sí pide dirección', async () => {
+      prisma.productVariant.findMany.mockResolvedValue([
+        digital(),
+        variant({ id: 'v2', sku: 'KORI-TEE-L' }),
+      ]);
+
+      await service.createSession({
+        items: [
+          { quantity: 1, variantId: 'v1' },
+          { quantity: 1, variantId: 'v2' },
+        ],
+      });
+
+      const params = callArg<Record<string, unknown>>(sessionsCreate);
+      expect(params.shipping_address_collection).toBeDefined();
     });
   });
 });

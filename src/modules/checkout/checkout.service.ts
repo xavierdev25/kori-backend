@@ -8,12 +8,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type Stripe from 'stripe';
 
+import { STORE_CURRENCY } from '../../common/money/currency';
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from '../payments/stripe.service';
 import { CreateCheckoutSessionDto } from './dto/create-checkout-session.dto';
 
-/** Moneda de la tienda. El CHECK de la base de datos solo admite esta. */
-const CURRENCY = 'mxn';
+/** Stripe quiere la moneda en minúsculas; la base de datos, en mayúsculas. */
+const CURRENCY = STORE_CURRENCY.toLowerCase();
 
 /**
  * Envío de tarifa fija, en centavos, guardado en `app_settings`.
@@ -44,7 +45,13 @@ export class CheckoutService {
     }
 
     const lines = await this.buildLinesFromDatabase(dto.items);
-    const shippingCents = await this.getFlatShippingCents();
+
+    // Un pedido de puras descargas no se envía a ninguna parte: ni cobra
+    // envío ni tiene sentido pedirle la dirección al comprador.
+    const soloDigital = lines.every(
+      (line) => line.fulfillmentType === 'DIGITAL',
+    );
+    const shippingCents = soloDigital ? 0 : await this.getFlatShippingCents();
     const subtotalCents = lines.reduce(
       (sum, line) => sum + line.lineTotalCents,
       0,
@@ -60,7 +67,7 @@ export class CheckoutService {
         subtotalCents,
         shippingCents,
         totalCents: subtotalCents + shippingCents,
-        currency: 'MXN',
+        currency: STORE_CURRENCY,
         customerEmail: dto.email ?? '',
         items: {
           create: lines.map((line) => ({
@@ -73,6 +80,7 @@ export class CheckoutService {
             lineTotalCents: line.lineTotalCents,
             providerProductUid: line.providerProductUid,
             printFileUrl: line.printFileUrl,
+            digitalAssetPath: line.digitalAssetPath,
             fulfillmentType: line.fulfillmentType,
           })),
         },
@@ -84,7 +92,13 @@ export class CheckoutService {
 
     try {
       const session = await stripe.checkout.sessions.create(
-        this.buildSessionParams(order.id, lines, shippingCents, dto.email),
+        this.buildSessionParams(
+          order.id,
+          lines,
+          shippingCents,
+          soloDigital,
+          dto.email,
+        ),
         // Si el comprador da doble clic al botón, Stripe devuelve la misma
         // sesión en vez de crear dos.
         { idempotencyKey: `checkout-session-${order.id}` },
@@ -166,6 +180,21 @@ export class CheckoutService {
         );
       }
 
+      if (
+        variant.product.fulfillmentType === 'DIGITAL' &&
+        !variant.digitalAssetPath
+      ) {
+        // Lo mismo para las descargas: cobrar por un archivo que no existe
+        // deja al comprador esperando un correo que nunca llega.
+        this.logger.error(
+          `La variante ${variant.id} está a la venta pero no tiene archivo`,
+        );
+
+        throw new UnprocessableEntityException(
+          'Uno de los productos de tu carrito no está disponible para descarga',
+        );
+      }
+
       if (quantity > 10) {
         throw new ConflictException('Máximo 10 unidades por talla');
       }
@@ -180,6 +209,7 @@ export class CheckoutService {
         lineTotalCents: variant.priceCents * quantity,
         providerProductUid: variant.providerProductUid,
         printFileUrl: variant.printFileUrl,
+        digitalAssetPath: variant.digitalAssetPath,
         fulfillmentType: variant.product.fulfillmentType,
       };
     });
@@ -204,11 +234,12 @@ export class CheckoutService {
       quantity: number;
     }[],
     shippingCents: number,
+    soloDigital: boolean,
     email?: string,
   ): Stripe.Checkout.SessionCreateParams {
     return {
       mode: 'payment',
-      locale: 'es',
+      locale: 'auto',
       line_items: lines.map((line) => ({
         quantity: line.quantity,
         price_data: {
@@ -219,9 +250,14 @@ export class CheckoutService {
           },
         },
       })),
-      // Solo México en el v1. Stripe rechaza cualquier otra dirección, así que
-      // no hace falta validarlo después.
-      shipping_address_collection: { allowed_countries: ['MX'] },
+      // La dirección solo se pide si hay algo físico que mandar. Pedírsela a
+      // quien compra un drumkit es fricción gratis, y limitarla a México le
+      // impediría pagar a cualquiera de fuera.
+      ...(soloDigital
+        ? {}
+        : {
+            shipping_address_collection: { allowed_countries: ['MX' as const] },
+          }),
       ...(shippingCents > 0
         ? {
             shipping_options: [

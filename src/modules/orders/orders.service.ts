@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus, Prisma } from '@prisma/client';
 
+import { STORE_CURRENCY } from '../../common/money/currency';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminOrdersQueryDto } from './dto/admin-orders-query.dto';
 
@@ -27,7 +28,13 @@ const SOLD_STATUSES: OrderStatus[] = [
 const STRIPE_PERCENTAGE_FEE = 0.036;
 const STRIPE_FIXED_FEE_CENTS = 300;
 
-/** La tienda vende solo en México: los días se cortan en su hora. */
+/**
+ * Los días de la gráfica se cortan en hora de México.
+ *
+ * Ya no es porque solo se venda ahí — los drumkits se venden en dólares a
+ * quien sea. Es porque quien mira el panel está en México: "las ventas del
+ * martes" tienen que ser su martes, no el de UTC.
+ */
 const TIENDA_TIMEZONE = 'America/Mexico_City';
 
 @Injectable()
@@ -149,7 +156,7 @@ export class OrdersService {
     ) as Record<OrderStatus, number>;
 
     return {
-      currency: 'MXN',
+      currency: STORE_CURRENCY,
       salesCount,
       grossRevenueCents,
       productsRevenueCents: sold._sum.subtotalCents ?? 0,
@@ -176,10 +183,10 @@ export class OrdersService {
    * del dinero: el panel solo pagina veinte pedidos, así que sumar en el
    * cliente daría una curva construida con la página que toque mirar.
    *
-   * Los días se cortan en hora de México y no en UTC. Es una tienda que
-   * vende solo en México: una venta de las 19:00 del día 8 en CDMX es del
-   * día 8, y en UTC aparecería como del 9. En un filtro de rango eso casi no
-   * se nota; en una gráfica diaria se ve, porque mueve las barras de sitio.
+   * Los días se cortan en hora de México y no en UTC: una venta de las 19:00
+   * del día 8 en CDMX es del día 8, y en UTC aparecería como del 9. En un
+   * filtro de rango casi no se nota; en una gráfica diaria se ve, porque
+   * mueve las barras de sitio.
    */
   async getSalesTimeseries(query: AdminOrdersQueryDto) {
     // El rango se maneja como días de calendario de la tienda, no como
@@ -249,7 +256,7 @@ export class OrdersService {
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
-    return { currency: 'MXN', days: dias, timeZone: TIENDA_TIMEZONE };
+    return { currency: STORE_CURRENCY, days: dias, timeZone: TIENDA_TIMEZONE };
   }
 
   /**

@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { STORE_CURRENCY } from '../../common/money/currency';
 import { PublicCatalogService } from './public-catalog.service';
 
 describe('PublicCatalogService', () => {
@@ -119,10 +120,10 @@ describe('PublicCatalogService', () => {
 
   it('la moneda viaja en la respuesta, la landing no la deduce', async () => {
     await expect(service.findAll()).resolves.toMatchObject({
-      currency: 'MXN',
+      currency: STORE_CURRENCY,
     });
     await expect(service.findBySlug('playera')).resolves.toMatchObject({
-      currency: 'MXN',
+      currency: STORE_CURRENCY,
     });
   });
 });

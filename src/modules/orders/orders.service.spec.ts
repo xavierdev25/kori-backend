@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { STORE_CURRENCY } from '../../common/money/currency';
 import { OrdersService } from './orders.service';
 
 describe('OrdersService', () => {
@@ -280,7 +281,7 @@ describe('OrdersService', () => {
 
       // El panel necesita poder decir en que hora esta leyendo la grafica.
       expect(serie.timeZone).toBe('America/Mexico_City');
-      expect(serie.currency).toBe('MXN');
+      expect(serie.currency).toBe(STORE_CURRENCY);
     });
 
     it('solo suma los estados que cuentan como venta cerrada', async () => {

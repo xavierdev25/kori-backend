@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { FulfillmentOrder, Order, OrderItem } from '@prisma/client';
 
+import { formatMoney } from '../../common/money/currency';
 import { EmailService, type EmailMessage } from './email.service';
 
 type OrderWithItems = Order & { items: OrderItem[] };
@@ -8,11 +9,7 @@ type OrderWithTracking = OrderWithItems & {
   fulfillmentOrders: FulfillmentOrder[];
 };
 
-const money = (cents: number): string =>
-  `$${(cents / 100).toLocaleString('es-MX', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} MXN`;
+const money = (cents: number): string => formatMoney(cents);
 
 /**
  * Redacción de los correos de la tienda.

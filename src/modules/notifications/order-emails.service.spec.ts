@@ -1,6 +1,7 @@
 import type { Order, OrderItem } from '@prisma/client';
 
 import { EmailService, type EmailMessage } from './email.service';
+import { formatMoney } from '../../common/money/currency';
 import { OrderEmailsService } from './order-emails.service';
 
 describe('OrderEmailsService', () => {
@@ -62,7 +63,7 @@ describe('OrderEmailsService', () => {
       await service.sendOrderConfirmation({ ...order(), items: [item()] });
 
       expect(sent[0].text).toContain('2 x Playera Kori (M / Negro)');
-      expect(sent[0].text).toContain('$1,198.00 MXN');
+      expect(sent[0].text).toContain(formatMoney(119800));
     });
 
     it('con envío incluido lo dice, no pone $0.00', async () => {
@@ -78,7 +79,7 @@ describe('OrderEmailsService', () => {
         items: [item()],
       });
 
-      expect(sent[0].text).toContain('Envío:    $150.00 MXN');
+      expect(sent[0].text).toContain(`Envío:    ${formatMoney(15000)}`);
     });
 
     it('incluye la dirección de envío', async () => {
@@ -159,7 +160,7 @@ describe('OrderEmailsService', () => {
       expect(sent[0].text).toContain('uid_m');
       expect(sent[0].text).toContain('https://kori.mx/print.png');
       expect(sent[0].text).toContain('Av. Insurgentes Sur 1234');
-      expect(sent[0].text).toContain('$1,198.00 MXN');
+      expect(sent[0].text).toContain(formatMoney(119800));
     });
 
     it('si falta un dato lo dice en vez de omitirlo', async () => {

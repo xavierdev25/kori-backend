@@ -312,6 +312,18 @@ export class CatalogService {
       }
     }
 
+    if (product.fulfillmentType === 'DIGITAL') {
+      // El equivalente digital de no tener archivo de impresión: publicarlo
+      // sería poner a la venta algo que nadie podría descargar.
+      const sinArchivo = product.variants.filter(
+        (variant) => !variant.digitalAssetPath,
+      );
+
+      if (sinArchivo.length > 0) {
+        problems.push('todavía no tiene el archivo subido');
+      }
+    }
+
     if (problems.length > 0) {
       throw new ConflictException(
         `No se puede publicar el producto porque ${problems.join('; ')}.`,

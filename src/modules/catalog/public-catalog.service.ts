@@ -3,8 +3,11 @@ import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 
-/** Moneda base de la tienda. La landing no debe deducirla ni fijarla a mano. */
-export const STORE_CURRENCY = 'MXN';
+// La moneda vive en common/money. Se importa para usarla aquí y se reexporta
+// para no romper a quien ya la pedía a este módulo.
+import { STORE_CURRENCY } from '../../common/money/currency';
+
+export { STORE_CURRENCY };
 
 /**
  * Proyección pública del catálogo.
