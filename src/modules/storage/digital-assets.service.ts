@@ -18,6 +18,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 
+import { CircuitBreaker } from '../../common/resilience/circuit-breaker';
+
 /**
  * El almacén de los archivos que se venden: drumkits, presets, lo que venga.
  *
@@ -95,6 +97,15 @@ export class DigitalAssetsService implements OnModuleInit {
   private readonly logger = new Logger(DigitalAssetsService.name);
   private readonly client: S3Client | null;
   private readonly bucket: string;
+  /**
+   * Un drumkit de 80 MB tarda; el umbral es alto a propósito para no abrir
+   * el circuito por una subida lenta. Lo que se quiere cortar es el
+   * almacenamiento caído, no el archivo grande.
+   */
+  private readonly breaker = new CircuitBreaker('el almacén de archivos', {
+    failureThreshold: 4,
+    resetMs: 30_000,
+  });
 
   constructor(private readonly configService: ConfigService) {
     const endpoint = this.configService.get<string>('S3_ENDPOINT');
@@ -180,13 +191,15 @@ export class DigitalAssetsService implements OnModuleInit {
 
     const path = `variants/${variantId}/${randomUUID()}.zip`;
 
-    await client.send(
-      new PutObjectCommand({
-        Body: file.buffer,
-        Bucket: this.bucket,
-        ContentType: 'application/zip',
-        Key: path,
-      }),
+    await this.breaker.run(() =>
+      client.send(
+        new PutObjectCommand({
+          Body: file.buffer,
+          Bucket: this.bucket,
+          ContentType: 'application/zip',
+          Key: path,
+        }),
+      ),
     );
 
     return { bytes: file.buffer.byteLength, path };
@@ -199,15 +212,17 @@ export class DigitalAssetsService implements OnModuleInit {
   async getSignedUrl(path: string, filename: string): Promise<string> {
     const client = this.requireClient();
 
-    return getSignedUrl(
-      client,
-      new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: path,
-        // Fuerza la descarga con un nombre legible en vez de abrir el UUID.
-        ResponseContentDisposition: `attachment; filename="${sanitizeFilename(filename)}"`,
-      }),
-      { expiresIn: SIGNED_URL_TTL_SECONDS },
+    return this.breaker.run(() =>
+      getSignedUrl(
+        client,
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: path,
+          // Fuerza la descarga con un nombre legible en vez del UUID.
+          ResponseContentDisposition: `attachment; filename="${sanitizeFilename(filename)}"`,
+        }),
+        { expiresIn: SIGNED_URL_TTL_SECONDS },
+      ),
     );
   }
 

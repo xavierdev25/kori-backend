@@ -29,6 +29,12 @@ export function normalizeLocale(raw: string | null | undefined): Locale {
 }
 
 interface EmailStrings {
+  access: {
+    body: string;
+    expiry: (minutes: number) => string;
+    ignore: string;
+    subject: string;
+  };
   confirmation: {
     body: string[];
     greeting: (name: string | null) => string;
@@ -58,6 +64,12 @@ interface EmailStrings {
 }
 
 const es: EmailStrings = {
+  access: {
+    body: 'Aquí tienes el enlace para ver tus compras y volver a descargarlas:',
+    expiry: (minutes) => `El enlace vale ${minutes} minutos.`,
+    ignore: 'Si no lo pediste tú, ignora este correo: no hace falta nada más.',
+    subject: 'Tus compras en Kori',
+  },
   confirmation: {
     body: [
       'Gracias por tu compra. Ya recibimos tu pago y tu pedido entró en',
@@ -93,6 +105,12 @@ const es: EmailStrings = {
 };
 
 const en: EmailStrings = {
+  access: {
+    body: 'Here is the link to see your purchases and download them again:',
+    expiry: (minutes) => `The link is valid for ${minutes} minutes.`,
+    ignore: "If you didn't ask for this, just ignore this email.",
+    subject: 'Your Kori purchases',
+  },
   confirmation: {
     body: [
       'Thanks for your order. We received your payment and it is now in',

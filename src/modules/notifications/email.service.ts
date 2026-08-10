@@ -1,5 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+
+import { CircuitBreaker } from '../../common/resilience/circuit-breaker';
 import { Resend } from 'resend';
 
 export interface EmailMessage {
@@ -21,6 +23,15 @@ const RESEND_TIMEOUT_MS = 10_000;
 @Injectable()
 export class EmailService implements OnModuleInit {
   private readonly logger = new Logger(EmailService.name);
+  /**
+   * El correo no es urgente: la cola reintenta con espera creciente. Por eso
+   * el descanso es largo — no tiene sentido machacar a un proveedor caído
+   * cuando el trabajo va a reintentarse igualmente dentro de un rato.
+   */
+  private readonly breaker = new CircuitBreaker('el envío de correo', {
+    failureThreshold: 5,
+    resetMs: 60_000,
+  });
   private readonly client: Resend | null;
   private readonly from: string;
   private readonly adminEmail: string;
@@ -84,14 +95,19 @@ export class EmailService implements OnModuleInit {
     }
 
     // El SDK de Resend no expone timeout, asi que se corta desde fuera: un
-    // envio colgado bloquearia la pasada entera de la cola.
-    const { error } = await this.withTimeout(
-      this.client.emails.send({
-        from: this.from,
-        to: message.to,
-        subject: message.subject,
-        text: message.text,
-      }),
+    // envio colgado bloquearia la pasada entera de la cola. Y el
+    // cortacircuitos evita esperar ese timeout una y otra vez cuando el
+    // proveedor lleva un rato caido: la cola se atasca menos y los trabajos
+    // se reintentan solos mas tarde.
+    const { error } = await this.breaker.run(() =>
+      this.withTimeout(
+        this.client!.emails.send({
+          from: this.from,
+          subject: message.subject,
+          text: message.text,
+          to: message.to,
+        }),
+      ),
     );
 
     if (error) {

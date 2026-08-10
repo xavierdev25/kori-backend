@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type Stripe from 'stripe';
 
+import { CircuitBreaker } from '../../common/resilience/circuit-breaker';
 import { STORE_CURRENCY } from '../../common/money/currency';
 import { normalizeLocale } from '../notifications/i18n/email-messages';
 import { PrismaService } from '../prisma/prisma.service';
@@ -29,6 +30,15 @@ export const SHIPPING_FLAT_CENTS_KEY = 'shipping_flat_cents';
 @Injectable()
 export class CheckoutService {
   private readonly logger = new Logger(CheckoutService.name);
+  /**
+   * Umbral bajo y descanso corto: si Stripe está caído, cada comprador que
+   * pulsa "Comprar" se queda medio minuto mirando un botón bloqueado. Es
+   * preferible decirle enseguida que lo intente en un momento.
+   */
+  private readonly breaker = new CircuitBreaker('el sistema de pago', {
+    failureThreshold: 3,
+    resetMs: 20_000,
+  });
 
   constructor(
     private readonly prismaService: PrismaService,
@@ -95,17 +105,19 @@ export class CheckoutService {
     });
 
     try {
-      const session = await stripe.checkout.sessions.create(
-        this.buildSessionParams(
-          order.id,
-          lines,
-          shippingCents,
-          soloDigital,
-          dto.email,
+      const session = await this.breaker.run(() =>
+        stripe.checkout.sessions.create(
+          this.buildSessionParams(
+            order.id,
+            lines,
+            shippingCents,
+            soloDigital,
+            dto.email,
+          ),
+          // Si el comprador da doble clic al botón, Stripe devuelve la
+          // misma sesión en vez de crear dos.
+          { idempotencyKey: `checkout-session-${order.id}` },
         ),
-        // Si el comprador da doble clic al botón, Stripe devuelve la misma
-        // sesión en vez de crear dos.
-        { idempotencyKey: `checkout-session-${order.id}` },
       );
 
       if (!session.url) {

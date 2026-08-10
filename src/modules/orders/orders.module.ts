@@ -10,17 +10,27 @@ import {
 } from './admin-orders.controller';
 import { DigitalDeliveryService } from './digital-delivery.service';
 import { DownloadsController } from './downloads.controller';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { PurchasesController } from './purchases.controller';
+import { PurchasesService } from './purchases.service';
 import { OrdersService } from './orders.service';
 
 @Module({
   controllers: [
     AdminOrdersController,
     AdminStatsController,
-    // Público y sin guard: la credencial del comprador es su token.
+    // Públicos y sin guard: la credencial del comprador es su token.
     DownloadsController,
+    PurchasesController,
   ],
   exports: [DigitalDeliveryService, OrdersService],
-  imports: [ConfigModule, PrismaModule, AuthModule, StorageModule],
-  providers: [DigitalDeliveryService, OrdersService],
+  imports: [
+    ConfigModule,
+    PrismaModule,
+    AuthModule,
+    StorageModule,
+    NotificationsModule,
+  ],
+  providers: [DigitalDeliveryService, OrdersService, PurchasesService],
 })
 export class OrdersModule {}

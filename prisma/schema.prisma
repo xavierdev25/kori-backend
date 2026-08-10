@@ -313,14 +313,14 @@ model Order {
   shippingQuoteId String?        @map("shipping_quote_id")
   shippingQuote   ShippingQuote? @relation(fields: [shippingQuoteId], references: [id])
 
-  customerEmail String  @map("customer_email")
+  customerEmail String @map("customer_email")
 
   /// Idioma en el que se le escribe al comprador: "es" o "en".
   ///
   /// Se captura del navegador en el checkout, no de la IP: la IP falla con
   /// VPN, con datos móviles y con quien viaja, mientras que el idioma del
   /// navegador es lo que esa persona eligió de verdad.
-  locale String @default("es")
+  locale        String  @default("es")
   customerName  String? @map("customer_name")
   customerPhone String? @map("customer_phone")
 
@@ -498,6 +498,31 @@ model DownloadGrant {
   @@index([orderItemId])
   @@index([expiresAt])
   @@map("download_grants")
+}
+
+/// Permiso temporal para ver las compras de un correo.
+///
+/// El comprador no tiene cuenta: pide un enlace, le llega al correo, y con él
+/// ve lo que compró y se vuelve a bajar sus archivos. Es el mismo trato que
+/// hace Gumroad, y evita guardar contraseñas de gente que solo quiere un zip.
+///
+/// El token en claro solo viaja en ese correo. Aquí queda su SHA-256, igual
+/// que en los refresh tokens y en los permisos de descarga.
+model PurchaseAccessToken {
+  id    String @id @default(uuid())
+  email String
+
+  tokenHash String @unique @map("token_hash")
+
+  /// Corto a propósito: es una llave a datos personales, no una sesión.
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("purchase_access_tokens")
 }
 
 enum OutboxJobType {

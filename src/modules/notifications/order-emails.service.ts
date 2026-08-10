@@ -88,6 +88,34 @@ export class OrderEmailsService {
     });
   }
 
+  /**
+   * El enlace para ver las compras. Va a quien lo pidió, sin cuenta de por
+   * medio: su correo es su credencial.
+   */
+  async sendPurchaseAccessLink(
+    to: string,
+    url: string,
+    minutosDeVida: number,
+    locale: string,
+  ): Promise<void> {
+    const m = t(locale).access;
+
+    await this.emailService.send({
+      subject: m.subject,
+      text: [
+        m.body,
+        '',
+        url,
+        '',
+        m.expiry(minutosDeVida),
+        m.ignore,
+        '',
+        `— ${t(locale).signature}`,
+      ].join('\n'),
+      to,
+    });
+  }
+
   /** Pedido pagado que hay que colocar a mano en el proveedor. */
   async sendManualFulfillmentRequest(order: OrderWithItems): Promise<void> {
     const lines = order.items.map(
