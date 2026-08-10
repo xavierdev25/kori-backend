@@ -162,6 +162,76 @@ export class PaymentsService {
     this.logger.log(`Pedido ${orderId} pagado y encolado para entrega`);
   }
 
+  /**
+   * Se devolvió el dinero: la descarga deja de valer.
+   *
+   * Sin esto, quien pedía un reembolso se quedaba con el pedido en PAID y con
+   * su enlace de descarga vivo las 72 horas completas. Para un archivo eso es
+   * regalar el producto — a diferencia de una playera, que al menos hay que
+   * mandar de vuelta.
+   *
+   * Solo se atienden los reembolsos totales. Uno parcial no significa que se
+   * pierda el derecho al archivo, y decidir eso a ciegas sería peor que
+   * dejarlo para revisión humana.
+   */
+  async handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
+    const orderId = charge.metadata?.orderId ?? null;
+    const paymentIntentId =
+      typeof charge.payment_intent === 'string' ? charge.payment_intent : null;
+
+    if (!orderId && !paymentIntentId) {
+      this.logger.warn('charge.refunded sin pedido identificable');
+      return;
+    }
+
+    const order = await this.prismaService.order.findFirst({
+      include: { items: { select: { id: true } } },
+      where: orderId
+        ? { id: orderId }
+        : { stripePaymentIntentId: paymentIntentId! },
+    });
+
+    if (!order) {
+      this.logger.warn(
+        `charge.refunded de un pedido desconocido (${charge.id})`,
+      );
+      return;
+    }
+
+    if (charge.amount_refunded < charge.amount) {
+      this.logger.log(
+        `Pedido ${order.id}: reembolso parcial, se deja para revisión manual`,
+      );
+      return;
+    }
+
+    await this.prismaService.$transaction(async (tx) => {
+      await tx.order.update({
+        data: {
+          events: {
+            create: {
+              note: `Reembolso total confirmado (${charge.id})`,
+              status: 'REFUNDED',
+            },
+          },
+          status: 'REFUNDED',
+        },
+        where: { id: order.id },
+      });
+
+      // Los enlaces vivos se cortan aquí mismo.
+      await tx.downloadGrant.updateMany({
+        data: { revokedAt: new Date() },
+        where: {
+          orderItemId: { in: order.items.map((item) => item.id) },
+          revokedAt: null,
+        },
+      });
+    });
+
+    this.logger.log(`Pedido ${order.id} reembolsado y descargas revocadas`);
+  }
+
   /** La sesión caducó sin pagar: el pedido pendiente deja de tener sentido. */
   async handleSessionExpired(session: Stripe.Checkout.Session): Promise<void> {
     const orderId = session.metadata?.orderId;

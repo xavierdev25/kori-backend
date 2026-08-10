@@ -105,6 +105,10 @@ export class StripeWebhookController {
         await this.paymentsService.handleSessionExpired(event.data.object);
         break;
 
+      case 'charge.refunded':
+        await this.paymentsService.handleChargeRefunded(event.data.object);
+        break;
+
       default:
         // checkout.session.completed entra aquí y se ignora a propósito: con
         // OXXO o SPEI se completa al emitir el voucher, días antes de que

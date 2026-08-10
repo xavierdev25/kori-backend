@@ -314,6 +314,13 @@ model Order {
   shippingQuote   ShippingQuote? @relation(fields: [shippingQuoteId], references: [id])
 
   customerEmail String  @map("customer_email")
+
+  /// Idioma en el que se le escribe al comprador: "es" o "en".
+  ///
+  /// Se captura del navegador en el checkout, no de la IP: la IP falla con
+  /// VPN, con datos móviles y con quien viaja, mientras que el idioma del
+  /// navegador es lo que esa persona eligió de verdad.
+  locale String @default("es")
   customerName  String? @map("customer_name")
   customerPhone String? @map("customer_phone")
 

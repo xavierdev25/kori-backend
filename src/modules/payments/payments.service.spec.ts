@@ -12,9 +12,15 @@ describe('PaymentsService', () => {
 
   let prisma: {
     webhookEvent: { create: jest.Mock; update: jest.Mock };
-    order: { findUnique: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
+    order: {
+      findFirst: jest.Mock;
+      findUnique: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
+    };
     orderEvent: { create: jest.Mock };
     outboxJob: { createMany: jest.Mock };
+    downloadGrant: { updateMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let service: PaymentsService;
@@ -53,6 +59,7 @@ describe('PaymentsService', () => {
         update: jest.fn().mockResolvedValue({}),
       },
       order: {
+        findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn().mockResolvedValue({
           id: 'order-1',
           status: 'PENDING_PAYMENT',
@@ -63,6 +70,7 @@ describe('PaymentsService', () => {
       },
       orderEvent: { create: jest.fn().mockResolvedValue({}) },
       outboxJob: { createMany: jest.fn().mockResolvedValue({ count: 2 }) },
+      downloadGrant: { updateMany: jest.fn().mockResolvedValue({}) },
       $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(prisma)),
     };
 
@@ -185,6 +193,71 @@ describe('PaymentsService', () => {
       } as unknown as Stripe.Checkout.Session);
 
       expect(prisma.orderEvent.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reembolso', () => {
+    const charge = (overrides: Record<string, unknown> = {}) =>
+      ({
+        amount: 2000,
+        amount_refunded: 2000,
+        id: 'ch_1',
+        metadata: { orderId: 'o1' },
+        payment_intent: 'pi_1',
+        ...overrides,
+      }) as unknown as Stripe.Charge;
+
+    beforeEach(() => {
+      prisma.order.findFirst.mockResolvedValue({
+        id: 'o1',
+        items: [{ id: 'i1' }, { id: 'i2' }],
+      });
+      prisma.downloadGrant.updateMany.mockResolvedValue({});
+    });
+
+    it('un reembolso total revoca los enlaces de descarga', async () => {
+      await service.handleChargeRefunded(charge());
+
+      // Sin esto, quien pide el dinero de vuelta se queda con el archivo.
+      const { data, where } = (
+        prisma.downloadGrant.updateMany.mock.calls as unknown[][]
+      )[0][0] as {
+        data: { revokedAt: Date };
+        where: { orderItemId: { in: string[] }; revokedAt: null };
+      };
+
+      expect(where.orderItemId.in).toEqual(['i1', 'i2']);
+      expect(where.revokedAt).toBeNull();
+      expect(data.revokedAt).toBeInstanceOf(Date);
+    });
+
+    it('el pedido queda como REFUNDED', async () => {
+      await service.handleChargeRefunded(charge());
+
+      const { data } = (
+        prisma.order.update.mock.calls as unknown[][]
+      )[0][0] as {
+        data: { status: string };
+      };
+
+      expect(data.status).toBe('REFUNDED');
+    });
+
+    it('un reembolso parcial no toca nada: lo decide una persona', async () => {
+      await service.handleChargeRefunded(
+        charge({ amount: 5000, amount_refunded: 1000 }),
+      );
+
+      expect(prisma.downloadGrant.updateMany).not.toHaveBeenCalled();
+      expect(prisma.order.update).not.toHaveBeenCalled();
+    });
+
+    it('un cargo de un pedido desconocido no revienta', async () => {
+      prisma.order.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.handleChargeRefunded(charge()),
+      ).resolves.toBeUndefined();
     });
   });
 });

@@ -6,6 +6,7 @@ import {
   IsEmail,
   IsInt,
   IsOptional,
+  IsString,
   IsUUID,
   Max,
   MaxLength,
@@ -37,6 +38,18 @@ export class CreateCheckoutSessionDto {
   @ValidateNested({ each: true })
   @Type(() => CheckoutItemDto)
   items!: CheckoutItemDto[];
+
+  /**
+   * Idioma del comprador, tal como lo declara su navegador ("es-MX", "en-GB").
+   *
+   * Se pide aquí y no se deduce de la IP: la IP falla con VPN, con datos
+   * móviles y con quien viaja, mientras que esto es lo que la persona eligió.
+   * Se normaliza en el servidor, así que da igual lo que llegue.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(35)
+  locale?: string;
 
   /** Solo para prerrellenar el campo en Stripe. No se usa para nada más. */
   @IsOptional()

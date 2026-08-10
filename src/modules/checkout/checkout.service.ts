@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import type Stripe from 'stripe';
 
 import { STORE_CURRENCY } from '../../common/money/currency';
+import { normalizeLocale } from '../notifications/i18n/email-messages';
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from '../payments/stripe.service';
 import { CreateCheckoutSessionDto } from './dto/create-checkout-session.dto';
@@ -69,6 +70,9 @@ export class CheckoutService {
         totalCents: subtotalCents + shippingCents,
         currency: STORE_CURRENCY,
         customerEmail: dto.email ?? '',
+        // Normalizado aquí: llegue lo que llegue, en la base solo hay
+        // idiomas que el sistema sabe escribir.
+        locale: normalizeLocale(dto.locale),
         items: {
           create: lines.map((line) => ({
             productVariantId: line.variantId,

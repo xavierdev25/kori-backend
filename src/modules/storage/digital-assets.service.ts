@@ -9,6 +9,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
+  BadRequestException,
   Injectable,
   Logger,
   OnModuleInit,
@@ -51,6 +52,38 @@ const MAX_BYTES = 500 * 1024 * 1024;
  * horas es el enlace del correo, no esto.
  */
 const SIGNED_URL_TTL_SECONDS = 60;
+
+/**
+ * Los cuatro primeros bytes de un ZIP: "PK\x03\x04".
+ *
+ * Se comprueban porque el `mimetype` lo manda el navegador y no significa
+ * nada: basta cambiarlo en la petición. Y no se puede quitar
+ * `application/octet-stream` de la lista de permitidos, porque es lo que
+ * mandan varios sistemas para un .zip legítimo. Mirar los bytes sí distingue.
+ */
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+
+/**
+ * Deja un nombre que pueda viajar en una cabecera HTTP.
+ *
+ * `productName` lo escribe quien administra, y acaba dentro de un
+ * `Content-Disposition`. Sin esto, un nombre con salto de línea podría
+ * inyectar cabeceras en la respuesta del almacén, y uno con acentos —
+ * "Otoño", nada rebuscado en una tienda mexicana — rompe la cabecera, que
+ * solo admite ASCII.
+ */
+export function sanitizeFilename(raw: string): string {
+  const limpio = raw
+    // Descompone los acentos y se queda con la letra base: "Otoño" → "Otono".
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    // Fuera saltos de línea, comillas, barras y cualquier cosa no imprimible.
+    .replace(/[^\x20-\x7e]/g, '')
+    .replace(/["\\/\r\n;]/g, '')
+    .trim();
+
+  return limpio.slice(0, 100) || 'descarga.zip';
+}
 
 export interface StoredAsset {
   bytes: number;
@@ -127,13 +160,20 @@ export class DigitalAssetsService implements OnModuleInit {
     const client = this.requireClient();
 
     if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-      throw new ServiceUnavailableException(
+      throw new BadRequestException(
         'Formato no permitido. Sube el kit comprimido en .zip',
       );
     }
 
+    // El `mimetype` lo dice el cliente; los bytes no mienten.
+    if (!file.buffer.subarray(0, 4).equals(ZIP_MAGIC)) {
+      throw new BadRequestException(
+        'El archivo no es un .zip. Comprime el kit antes de subirlo.',
+      );
+    }
+
     if (file.buffer.byteLength > MAX_BYTES) {
-      throw new ServiceUnavailableException(
+      throw new BadRequestException(
         `El archivo pesa más de ${MAX_BYTES / 1024 / 1024} MB`,
       );
     }
@@ -165,7 +205,7 @@ export class DigitalAssetsService implements OnModuleInit {
         Bucket: this.bucket,
         Key: path,
         // Fuerza la descarga con un nombre legible en vez de abrir el UUID.
-        ResponseContentDisposition: `attachment; filename="${filename.replace(/"/g, '')}"`,
+        ResponseContentDisposition: `attachment; filename="${sanitizeFilename(filename)}"`,
       }),
       { expiresIn: SIGNED_URL_TTL_SECONDS },
     );

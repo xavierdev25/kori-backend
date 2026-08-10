@@ -183,4 +183,39 @@ describe('OrderEmailsService', () => {
       ).rejects.toThrow('ADMIN_ALERT_EMAIL');
     });
   });
+
+  describe('idioma del comprador', () => {
+    it('un pedido en ingles recibe el correo en ingles', async () => {
+      await service.sendOrderConfirmation({
+        ...order({ locale: 'en' }),
+        items: [item()],
+      });
+
+      expect(sent[0].subject).toContain('is confirmed');
+      expect(sent[0].text).toContain('Thanks for your order');
+      expect(sent[0].text).not.toContain('Gracias');
+    });
+
+    it('un pedido en espanol sigue en espanol', async () => {
+      await service.sendOrderConfirmation({
+        ...order({ locale: 'es' }),
+        items: [item()],
+      });
+
+      expect(sent[0].subject).toContain('confirmado');
+      expect(sent[0].text).toContain('Gracias por tu compra');
+    });
+
+    it('los enlaces de descarga tambien viajan traducidos', async () => {
+      await service.sendDownloadLinks(
+        { ...order({ locale: 'en' }), items: [item()] },
+        [{ nombre: 'DICIEMBRE', url: 'https://kori.mx/downloads/x' }],
+        72,
+        5,
+      );
+
+      expect(sent[0].subject).toContain('Your Kori download');
+      expect(sent[0].text).toContain('expire in 72 hours');
+    });
+  });
 });

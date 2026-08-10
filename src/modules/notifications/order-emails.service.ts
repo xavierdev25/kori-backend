@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { FulfillmentOrder, Order, OrderItem } from '@prisma/client';
 
 import { formatMoney } from '../../common/money/currency';
+import { t } from './i18n/email-messages';
 import { EmailService, type EmailMessage } from './email.service';
 
 type OrderWithItems = Order & { items: OrderItem[] };
@@ -64,19 +65,25 @@ export class OrderEmailsService {
     horasDeCaducidad: number,
     descargasMaximas: number,
   ): Promise<void> {
+    const m = t(order.locale).downloads;
     const lista = enlaces
       .map((enlace) => `  · ${enlace.nombre}\n    ${enlace.url}`)
       .join('\n\n');
 
     await this.emailService.send({
-      subject: `Tu descarga de Kori — pedido #${order.orderNumber}`,
-      text:
-        `Gracias por tu compra.\n\n` +
-        `Aquí están tus archivos:\n\n${lista}\n\n` +
-        `Los enlaces caducan en ${horasDeCaducidad} horas y sirven para ` +
-        `${descargasMaximas} descargas.\n` +
-        `Si se te pasa el plazo, escríbenos y te mandamos unos nuevos.\n\n` +
-        `— Kori`,
+      subject: m.subject(order.orderNumber),
+      text: [
+        m.thanks,
+        '',
+        m.body,
+        '',
+        lista,
+        '',
+        m.expiry(horasDeCaducidad, descargasMaximas),
+        m.ifExpired,
+        '',
+        `— ${t(order.locale).signature}`,
+      ].join('\n'),
       to: order.customerEmail,
     });
   }
@@ -111,6 +118,7 @@ export class OrderEmailsService {
   }
 
   private buildConfirmation(order: OrderWithItems): EmailMessage {
+    const m = t(order.locale).confirmation;
     const lines = order.items.map(
       (item) =>
         `  ${item.quantity} x ${item.productName} (${item.variantLabel})` +
@@ -119,29 +127,27 @@ export class OrderEmailsService {
 
     return {
       to: order.customerEmail,
-      subject: `Tu pedido #${order.orderNumber} está confirmado`,
+      subject: m.subject(order.orderNumber),
       text: [
-        `Hola${order.customerName ? ` ${order.customerName}` : ''},`,
+        m.greeting(order.customerName),
         '',
-        'Gracias por tu compra. Ya recibimos tu pago y tu pedido entró en',
-        'producción: cada prenda se imprime bajo pedido, así que tarda unos',
-        'días más que algo que ya está en un almacén.',
+        ...m.body,
         '',
-        `PEDIDO #${order.orderNumber}`,
+        m.orderLabel(order.orderNumber),
         ...lines,
         '',
-        `  Subtotal: ${money(order.subtotalCents)}`,
+        `${m.subtotal} ${money(order.subtotalCents)}`,
         order.shippingCents > 0
-          ? `  Envío:    ${money(order.shippingCents)}`
-          : '  Envío:    incluido',
-        `  Total:    ${money(order.totalCents)}`,
+          ? `${m.shippingLabel} ${money(order.shippingCents)}`
+          : m.shippingFree,
+        `${m.total} ${money(order.totalCents)}`,
         '',
-        'ENVIAREMOS A',
+        m.shipTo,
         this.formatAddress(order),
         '',
-        'Te escribimos otra vez en cuanto salga, con el número de rastreo.',
+        m.trackingSoon,
         '',
-        'Kori',
+        t(order.locale).signature,
       ].join('\n'),
     };
   }

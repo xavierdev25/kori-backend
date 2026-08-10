@@ -33,6 +33,8 @@ export class StorageService implements OnModuleInit {
   private readonly supabase: ReturnType<typeof createClient> | null;
   private readonly bucket: string;
   private readonly localBaseUrl: string;
+  /** Se rellena al arrancar. Ver `isReachable`. */
+  private reachable = false;
 
   constructor(private readonly configService: ConfigService) {
     this.driver =
@@ -97,13 +99,33 @@ export class StorageService implements OnModuleInit {
         throw new Error(error.message);
       }
 
+      this.reachable = true;
       this.logger.log(
         `Supabase Storage connected successfully. Bucket "${this.bucket}" is available`,
       );
     } catch (error) {
-      this.logger.error(this.getStorageErrorMessage(error));
-      throw error;
+      // Se avisa muy fuerte, pero NO se relanza.
+      //
+      // Antes esto tumbaba el arranque entero de la aplicación. Con Supabase
+      // pausándose a los 7 días de inactividad y Render reiniciando el
+      // contenedor tras 15 minutos sin tráfico, bastaba que coincidieran para
+      // que la API no levantara: ni pedidos, ni webhook de Stripe, ni panel.
+      // Todo caído por no poder subir una imagen.
+      //
+      // Lo que depende del almacén falla con un 503 claro; lo que no, sigue.
+      this.reachable = false;
+      this.logger.error(
+        `${this.getStorageErrorMessage(error)} — la aplicación arranca igual, pero subir imágenes responderá 503 hasta que se restablezca.`,
+      );
     }
+  }
+
+  /**
+   * Si el almacén respondió al arrancar. Lo usa /health/readiness para
+   * distinguir "sano" de "funcionando a medias".
+   */
+  get isReachable(): boolean {
+    return this.driver === 'local' || this.reachable;
   }
 
   /** Dibujos del muro. Envoltorio sobre uploadImage por compatibilidad. */
