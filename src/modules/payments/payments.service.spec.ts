@@ -21,6 +21,7 @@ describe('PaymentsService', () => {
     orderEvent: { create: jest.Mock };
     outboxJob: { createMany: jest.Mock };
     downloadGrant: { updateMany: jest.Mock };
+    subscriber: { createMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let service: PaymentsService;
@@ -71,6 +72,7 @@ describe('PaymentsService', () => {
       orderEvent: { create: jest.fn().mockResolvedValue({}) },
       outboxJob: { createMany: jest.fn().mockResolvedValue({ count: 2 }) },
       downloadGrant: { updateMany: jest.fn().mockResolvedValue({}) },
+      subscriber: { createMany: jest.fn().mockResolvedValue({ count: 1 }) },
       $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(prisma)),
     };
 
@@ -170,6 +172,65 @@ describe('PaymentsService', () => {
         service.handlePaymentSucceeded(paymentIntent()),
       ).resolves.toBeUndefined();
       expect(prisma.order.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('casilla de novedades', () => {
+    const pedido = (newsletterOptIn: boolean) => ({
+      id: 'order-1',
+      items: [],
+      newsletterOptIn,
+      status: 'PENDING_PAYMENT',
+    });
+
+    it('sin marcar, nadie acaba en la lista', async () => {
+      prisma.order.findUnique.mockResolvedValue(pedido(false));
+
+      await service.handlePaymentSucceeded(paymentIntent());
+
+      expect(prisma.subscriber.createMany).not.toHaveBeenCalled();
+    });
+
+    it('marcada, se apunta el correo que Stripe verificó', async () => {
+      prisma.order.findUnique.mockResolvedValue(pedido(true));
+
+      await service.handlePaymentSucceeded(paymentIntent());
+
+      const args = callArg<{
+        data: { email: string }[];
+        skipDuplicates: boolean;
+      }>(prisma.subscriber.createMany);
+
+      expect(args.data).toEqual([{ email: 'comprador@kori.mx' }]);
+      // Sin `skipDuplicates`, un correo ya suscrito daría error de clave
+      // única y tiraría la transacción: el pedido pagado se perdería por
+      // una casilla de novedades.
+      expect(args.skipDuplicates).toBe(true);
+    });
+
+    it('el alta va DENTRO de la misma transacción que el pago', async () => {
+      prisma.order.findUnique.mockResolvedValue(pedido(true));
+
+      await service.handlePaymentSucceeded(paymentIntent());
+
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(prisma.subscriber.createMany).toHaveBeenCalled();
+    });
+
+    it('sin correo no se apunta una fila vacía', async () => {
+      prisma.order.findUnique.mockResolvedValue({
+        ...pedido(true),
+        customerEmail: '',
+      });
+
+      await service.handlePaymentSucceeded(
+        paymentIntent({ receipt_email: null }),
+      );
+
+      expect(prisma.subscriber.createMany).not.toHaveBeenCalled();
+      // Y aun así el pedido se cobra y se encola: lo de la lista es lo
+      // accesorio, no al revés.
+      expect(prisma.outboxJob.createMany).toHaveBeenCalled();
     });
   });
 

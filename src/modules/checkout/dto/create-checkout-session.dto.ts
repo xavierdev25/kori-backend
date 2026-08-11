@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEmail,
   IsInt,
   IsOptional,
@@ -50,6 +51,18 @@ export class CreateCheckoutSessionDto {
   @IsString()
   @MaxLength(35)
   locale?: string;
+
+  /**
+   * Si marcó la casilla de novedades.
+   *
+   * Va sin marcar por defecto y así llega: `undefined` es "no". Nadie acaba
+   * en la lista por no haber mirado. El alta no ocurre aquí sino cuando el
+   * pago se confirma, con el correo que Stripe verificó: apuntar a alguien
+   * que abandonó el pago sería apuntar a quien nunca llegó a comprar.
+   */
+  @IsOptional()
+  @IsBoolean()
+  newsletter?: boolean;
 
   /** Solo para prerrellenar el campo en Stripe. No se usa para nada más. */
   @IsOptional()

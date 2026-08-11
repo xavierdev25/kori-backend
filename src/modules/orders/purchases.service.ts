@@ -65,12 +65,32 @@ export class PurchasesService {
       },
     });
 
-    await this.orderEmailsService.sendPurchaseAccessLink(
-      email,
-      `${this.baseUrl()}/mis-compras/${token}`,
-      ACCESS_TTL_MINUTES,
-      pedido.locale,
-    );
+    // El envío se traga sus propios errores a propósito.
+    //
+    // Sin esto, un correo con compras devolvía 500 cuando el proveedor de
+    // correo fallaba, mientras que uno sin compras devolvía 200: la
+    // diferencia entre las dos respuestas convierte este endpoint en un
+    // detector de clientes, que es justo lo que las dos respuestas idénticas
+    // pretendían evitar. Y no es hipotético: basta con que caduque la clave
+    // de Resend para que el oráculo se abra solo.
+    //
+    // El precio es que un envío fallido se ve como un envío correcto. Por eso
+    // se registra como error: quien mire los logs lo ve, quien pruebe
+    // direcciones desde fuera no.
+    try {
+      await this.orderEmailsService.sendPurchaseAccessLink(
+        email,
+        `${this.baseUrl()}/mis-compras/${token}`,
+        ACCESS_TTL_MINUTES,
+        pedido.locale,
+      );
+    } catch (error) {
+      this.logger.error(
+        `No se pudo enviar el enlace de acceso: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**

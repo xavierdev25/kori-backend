@@ -324,6 +324,13 @@ model Order {
   customerName  String? @map("customer_name")
   customerPhone String? @map("customer_phone")
 
+  /// Si marcó la casilla de novedades al comprar.
+  ///
+  /// Se guarda en el pedido y no solo en la lista de suscriptores porque esto
+  /// es la prueba del consentimiento: queda con fecha y con el pedido en el
+  /// que se dio. Si alguien reclama que nunca se apuntó, hay dónde mirarlo.
+  newsletterOptIn Boolean @default(false) @map("newsletter_opt_in")
+
   shipName       String? @map("ship_name")
   shipLine1      String? @map("ship_line1")
   shipLine2      String? @map("ship_line2")

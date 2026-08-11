@@ -97,6 +97,22 @@ describe('PurchasesService', () => {
       expect(where.customerEmail).toBe('ana@ejemplo.mx');
     });
 
+    it('si el correo no sale, responde igual que si no hubiera compras', async () => {
+      emails.sendPurchaseAccessLink.mockRejectedValue(new Error('Resend 401'));
+
+      // Las dos ramas tienen que ser indistinguibles desde fuera. Cuando esto
+      // no era así, un 500 aquí y un 200 sin compras convertían el endpoint
+      // en un detector de clientes de kor!.
+      await expect(
+        service.requestAccess('ana@ejemplo.mx'),
+      ).resolves.toBeUndefined();
+
+      prisma.order.findFirst.mockResolvedValue(null);
+      await expect(
+        service.requestAccess('desconocido@ejemplo.mx'),
+      ).resolves.toBeUndefined();
+    });
+
     it('el token se guarda hasheado, nunca en claro', async () => {
       await service.requestAccess('ana@ejemplo.mx');
 

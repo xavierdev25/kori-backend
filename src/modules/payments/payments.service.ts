@@ -97,6 +97,7 @@ export class PaymentsService {
 
     const charge = paymentIntent.latest_charge;
     const shipping = paymentIntent.shipping;
+    const email = paymentIntent.receipt_email ?? order.customerEmail ?? '';
 
     await this.prismaService.$transaction(async (tx) => {
       await tx.order.update({
@@ -106,8 +107,7 @@ export class PaymentsService {
           paidAt: new Date(),
           // Único en la base de datos: la defensa final contra el doble cobro.
           stripePaymentIntentId: paymentIntent.id,
-          customerEmail:
-            paymentIntent.receipt_email ?? order.customerEmail ?? '',
+          customerEmail: email,
           customerName: shipping?.name ?? order.customerName,
           customerPhone: shipping?.phone ?? order.customerPhone,
           shipName: shipping?.name,
@@ -127,6 +127,20 @@ export class PaymentsService {
           },
         },
       });
+
+      // El alta en la lista va aquí y no en el checkout porque hasta este
+      // momento no hay ni compra ni correo verificado.
+      //
+      // `createMany` con `skipDuplicates` en vez de `create` a propósito: un
+      // correo que ya estaba en la lista daría un error de clave única, y ese
+      // error tiraría la transacción entera. Un pedido pagado no se puede
+      // perder por una casilla de novedades.
+      if (order.newsletterOptIn && email) {
+        await tx.subscriber.createMany({
+          data: [{ email }],
+          skipDuplicates: true,
+        });
+      }
 
       // El trabajo pesado no se hace aquí: se encola. El webhook tiene que
       // responder 200 rápido, y la cola vive en Postgres para sobrevivir a que

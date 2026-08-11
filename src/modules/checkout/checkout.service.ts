@@ -83,6 +83,9 @@ export class CheckoutService {
         // Normalizado aquí: llegue lo que llegue, en la base solo hay
         // idiomas que el sistema sabe escribir.
         locale: normalizeLocale(dto.locale),
+        // `=== true` y no truthy: así un "sí" que no sea exactamente un
+        // booleano no apunta a nadie a la lista por accidente.
+        newsletterOptIn: dto.newsletter === true,
         items: {
           create: lines.map((line) => ({
             productVariantId: line.variantId,
