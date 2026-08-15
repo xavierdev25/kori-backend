@@ -32,7 +32,7 @@ jobs:
     steps:
       - name: Ejecutar barrido
         env:
-          BACKEND_URL: ${{ vars.BACKEND_URL || 'https://kori-backend-9lzl.onrender.com' }}
+          BACKEND_URL: ${{ vars.BACKEND_URL || 'https://api.insecurekori.com' }}
           INTERNAL_TASK_SECRET: ${{ secrets.INTERNAL_TASK_SECRET }}
         run: |
           set -uo pipefail

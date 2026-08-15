@@ -1,0 +1,167 @@
+name: Deploy
+
+# Despliegue a EC2.
+#
+# Cuando el backend vivia en Render, desplegaba el propio Render al detectar
+# un push. Al mudarnos a AWS eso desaparecio y nadie lo sustituyo: durante
+# unos dias, hacer push a main no tocaba el servidor. Esto lo arregla.
+#
+# Se dispara SOLO cuando CI termina en verde sobre main. Desplegar en paralelo
+# a los tests significa que un fallo llega a produccion igual, solo que te
+# enteras un minuto despues.
+#
+# No hay claves de AWS guardadas aqui: la autenticacion es por OIDC, que emite
+# credenciales temporales para cada ejecucion. Y no se abre SSH ni se guarda
+# ninguna .pem: la orden viaja por SSM, que ademas deja registro de quien
+# desplego y cuando.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  # No se cancela el que este en curso: cortar un despliegue a la mitad deja
+  # el contenedor en un estado que nadie eligio.
+  cancel-in-progress: false
+
+permissions:
+  # Obligatorio para pedir el token de OIDC. `contents: read` es lo minimo
+  # para el checkout.
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: kori-backend
+  INSTANCE_NAME: kori-api
+
+jobs:
+  deploy:
+    name: Construir y desplegar
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # En workflow_dispatch no hay conclusion previa que mirar.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # workflow_run apunta por defecto a la rama por defecto, no al commit
+          # que disparo CI. Sin esto se desplegaria un commit distinto del que
+          # se probo, que es la peor clase de sorpresa.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Autenticarse en AWS por OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Entrar en ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Preparar buildx
+        uses: docker/setup-buildx-action@v3
+
+      # El servidor es Graviton (t4g), asi que la imagen tiene que ser arm64.
+      # Una imagen amd64 arranca por emulacion si acaso, y va lentisima.
+      - name: Construir y subir la imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.event.workflow_run.head_sha || github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Construir y subir la imagen de migraciones
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrator
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:migrator
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Localizar la instancia
+        id: instancia
+        run: |
+          set -euo pipefail
+
+          id=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${INSTANCE_NAME}" \
+                      "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+
+          # Se busca por etiqueta y no por id fijo para que recrear la
+          # instancia no obligue a tocar el workflow. Pero dos instancias con
+          # el mismo nombre significaria desplegar en una al azar.
+          if [ -z "$id" ]; then
+            echo "::error::No hay ninguna instancia en marcha con Name=${INSTANCE_NAME}"
+            exit 1
+          fi
+
+          if [ "$(echo "$id" | wc -w)" -gt 1 ]; then
+            echo "::error::Hay varias instancias con Name=${INSTANCE_NAME}: $id"
+            exit 1
+          fi
+
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "Instancia: $id"
+
+      # Las migraciones van antes de cambiar el contenedor y en su propio paso.
+      # Son aditivas por norma del proyecto, asi que la version vieja sigue
+      # funcionando con el esquema nuevo durante los segundos que dura el
+      # cambio. Al reves —arrancar codigo nuevo contra un esquema viejo— si
+      # rompe.
+      - name: Aplicar migraciones
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/.github/scripts/ssm-run.sh" \
+            "${{ steps.instancia.outputs.id }}" \
+            "cd /home/ec2-user && docker compose pull migrator && docker compose run --rm migrator"
+
+      - name: Actualizar el contenedor
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/.github/scripts/ssm-run.sh" \
+            "${{ steps.instancia.outputs.id }}" \
+            "cd /home/ec2-user && docker compose pull api && docker compose up -d api && docker image prune -f"
+
+      # Desplegar y no comprobar es desplegar a ciegas. Si esto falla, el
+      # workflow sale en rojo y te enteras por correo en vez de por un cliente.
+      - name: Comprobar que responde
+        run: |
+          set -euo pipefail
+
+          for intento in 1 2 3 4 5 6 7 8 9 10; do
+            estado=$(curl -sS -o /tmp/salud.json -w '%{http_code}' \
+              --max-time 20 https://api.insecurekori.com/health/readiness) || estado=000
+
+            if [ "$estado" = "200" ]; then
+              echo "Responde 200:"
+              cat /tmp/salud.json
+              exit 0
+            fi
+
+            echo "intento $intento: http=$estado"
+            sleep 10
+          done
+
+          echo "::error::El backend no volvio a responder 200 tras el despliegue"
+          exit 1
