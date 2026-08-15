@@ -129,12 +129,18 @@ jobs:
       # funcionando con el esquema nuevo durante los segundos que dura el
       # cambio. Al reves —arrancar codigo nuevo contra un esquema viejo— si
       # rompe.
+      # El token de ECR caduca a las 12 horas, asi que un `docker login` hecho
+      # a mano en la instancia solo sirve para el resto del dia: al siguiente
+      # despliegue, `pull` falla con un error de autenticacion que no menciona
+      # la caducidad. Se renueva aqui en cada despliegue, usando el rol de la
+      # propia instancia (AmazonEC2ContainerRegistryReadOnly), sin guardar
+      # ninguna credencial en ningun sitio.
       - name: Aplicar migraciones
         run: |
           set -euo pipefail
           bash "${GITHUB_WORKSPACE}/.github/scripts/ssm-run.sh" \
             "${{ steps.instancia.outputs.id }}" \
-            "cd /home/ec2-user && docker compose pull migrator && docker compose run --rm migrator"
+            "cd /home/ec2-user && aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${{ steps.ecr.outputs.registry }} && docker compose pull migrator && docker compose run --rm migrator"
 
       - name: Actualizar el contenedor
         run: |
