@@ -357,6 +357,11 @@ export class StorageService implements OnModuleInit {
         new PutObjectCommand({
           Body: file.buffer,
           Bucket: this.bucket,
+          // Un año e `immutable` porque la ruta lleva un UUID: este archivo
+          // no se reescribe nunca, cambiar la imagen genera una ruta nueva.
+          // Sin esto, CloudFront usa su valor por defecto (24 h) y vuelve a
+          // pedirle a S3 algo que jamás cambia.
+          CacheControl: 'public, max-age=31536000, immutable',
           // Sin esto el navegador se descarga la imagen en vez de mostrarla:
           // S3 sirve `application/octet-stream` cuando no se le dice nada.
           ContentType: file.mimetype,
