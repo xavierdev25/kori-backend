@@ -22,6 +22,78 @@ describe('validateEnvironment', () => {
     S3_SECRET_ACCESS_KEY: 'secret',
   };
 
+  describe('driver s3 para las imágenes', () => {
+    const conS3 = (overrides: Record<string, string> = {}) => ({
+      ...base(),
+      ...s3,
+      S3_PUBLIC_BASE_URL: 'https://img.insecurekori.com',
+      S3_PUBLIC_BUCKET: 'kori-publico',
+      STORAGE_DRIVER: 's3',
+      ...overrides,
+    });
+
+    it('con todas sus variables, arranca', () => {
+      expect(() => validateEnvironment(conS3())).not.toThrow();
+    });
+
+    it('sin el bucket público no arranca', () => {
+      const sinBucket = conS3();
+      delete (sinBucket as Record<string, unknown>).S3_PUBLIC_BUCKET;
+
+      expect(() => validateEnvironment(sinBucket)).toThrow(/S3_PUBLIC_BUCKET/);
+    });
+
+    it('el bucket público NO puede ser el de los drumkits', () => {
+      // Si se confunden, cada kit de pago queda descargable desde una URL sin
+      // firmar. Vale más no arrancar que arrancar regalando el producto.
+      expect(() =>
+        validateEnvironment(conS3({ S3_PUBLIC_BUCKET: 'kori-digital' })),
+      ).toThrow(/must differ from S3_BUCKET/);
+    });
+
+    it('un driver inventado no cuela', () => {
+      expect(() =>
+        validateEnvironment({ ...base(), STORAGE_DRIVER: 's3-ish' }),
+      ).toThrow(/supabase, s3 or local/);
+    });
+
+    it('el mismo nombre de bucket en OTRO proveedor sí vale', () => {
+      // Los drumkits en Backblaze y las imágenes en S3 pueden llamarse igual
+      // sin pisarse: son cajas distintas. Lo que no vale es la misma caja.
+      expect(() =>
+        validateEnvironment(
+          conS3({
+            S3_PUBLIC_BUCKET: 'kori-digital',
+            S3_PUBLIC_ENDPOINT: 'https://s3.us-east-1.amazonaws.com',
+          }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('credenciales propias del bucket público, sin heredar nada', () => {
+      const soloPropias = {
+        ...base(),
+        S3_PUBLIC_ACCESS_KEY_ID: 'otra-key',
+        S3_PUBLIC_BASE_URL: 'https://img.insecurekori.com',
+        S3_PUBLIC_BUCKET: 'kori-publico',
+        S3_PUBLIC_ENDPOINT: 'https://s3.us-east-1.amazonaws.com',
+        S3_PUBLIC_SECRET_ACCESS_KEY: 'otro-secreto',
+        STORAGE_DRIVER: 's3',
+      };
+
+      expect(() => validateEnvironment(soloPropias)).not.toThrow();
+    });
+
+    it('sin endpoint por ningún lado, no arranca', () => {
+      const sinEndpoint = conS3();
+      delete (sinEndpoint as Record<string, unknown>).S3_ENDPOINT;
+
+      expect(() => validateEnvironment(sinEndpoint)).toThrow(
+        /S3_PUBLIC_ENDPOINT/,
+      );
+    });
+  });
+
   describe('almacén de archivos digitales', () => {
     it('sin ninguna variable arranca: el almacén es opcional', () => {
       // El backend tiene que poder desplegarse antes de tener el bucket, igual

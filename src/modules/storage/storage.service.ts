@@ -2,6 +2,12 @@ import { mkdir, unlink, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 
 import {
+  DeleteObjectCommand,
+  HeadBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import {
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -21,7 +27,12 @@ export interface StoredFile {
   storagePath: string;
 }
 
-export type StorageDriver = 'supabase' | 'local';
+/**
+ * `s3` habla S3 genérico, no la API de ningún proveedor concreto: sirve para
+ * Backblaze B2, Cloudflare R2 o el S3 de Amazon cambiando solo variables de
+ * entorno. Es lo que permite salir de Supabase sin reescribir nada.
+ */
+export type StorageDriver = 'supabase' | 's3' | 'local';
 
 /** Carpeta de subida del driver local (servida como /uploads en main.ts). */
 export const LOCAL_UPLOADS_DIR = 'uploads';
@@ -31,16 +42,70 @@ export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
   private readonly driver: StorageDriver;
   private readonly supabase: ReturnType<typeof createClient> | null;
+  private readonly s3: S3Client | null = null;
+  /** Prefijo público de las imágenes del driver s3. Sin barra final. */
+  private readonly s3PublicBaseUrl: string = '';
   private readonly bucket: string;
   private readonly localBaseUrl: string;
   /** Se rellena al arrancar. Ver `isReachable`. */
   private reachable = false;
 
   constructor(private readonly configService: ConfigService) {
-    this.driver =
-      this.configService.get<string>('STORAGE_DRIVER') === 'local'
-        ? 'local'
-        : 'supabase';
+    this.driver = this.resolveDriver(
+      this.configService.get<string>('STORAGE_DRIVER'),
+    );
+
+    if (this.driver === 's3') {
+      this.supabase = null;
+      this.localBaseUrl = '';
+      this.bucket = this.configService.getOrThrow<string>('S3_PUBLIC_BUCKET');
+      this.s3PublicBaseUrl = this.configService
+        .getOrThrow<string>('S3_PUBLIC_BASE_URL')
+        .replace(/\/+$/, '');
+
+      // Las credenciales propias son opcionales y caen a las del bucket
+      // privado si no están. Con un solo proveedor no hay que repetir nada;
+      // con dos —los drumkits en Backblaze, que sale más barato para archivos
+      // de 80 MB, y las imágenes en S3— cada uno lleva las suyas.
+      const endpoint =
+        this.configService.get<string>('S3_PUBLIC_ENDPOINT') ??
+        this.configService.getOrThrow<string>('S3_ENDPOINT');
+
+      // Este bucket es PÚBLICO y el de los drumkits es privado. Si alguien
+      // apunta los dos al mismo sitio, cada kit de pago queda descargable
+      // desde una URL sin firmar y sin que nada lo delate. Se para el
+      // arranque antes que dejar pasar eso. Se comparan endpoint y bucket
+      // juntos: el mismo nombre en dos proveedores distintos no es colisión.
+      if (
+        this.bucket === this.configService.get<string>('S3_BUCKET') &&
+        endpoint === this.configService.get<string>('S3_ENDPOINT')
+      ) {
+        throw new Error(
+          'S3_PUBLIC_BUCKET no puede ser el mismo bucket que S3_BUCKET: ' +
+            'ese guarda los productos de pago y no puede ser público.',
+        );
+      }
+
+      this.s3 = new S3Client({
+        credentials: {
+          accessKeyId:
+            this.configService.get<string>('S3_PUBLIC_ACCESS_KEY_ID') ??
+            this.configService.getOrThrow<string>('S3_ACCESS_KEY_ID'),
+          secretAccessKey:
+            this.configService.get<string>('S3_PUBLIC_SECRET_ACCESS_KEY') ??
+            this.configService.getOrThrow<string>('S3_SECRET_ACCESS_KEY'),
+        },
+        endpoint,
+        // B2 y R2 solo entienden `endpoint/bucket/clave`.
+        forcePathStyle: true,
+        region:
+          this.configService.get<string>('S3_PUBLIC_REGION') ??
+          this.configService.get<string>('S3_REGION') ??
+          'auto',
+      });
+
+      return;
+    }
 
     if (this.driver === 'local') {
       // Modo desarrollo: archivos en disco, sin dependencia de Supabase.
@@ -81,7 +146,36 @@ export class StorageService implements OnModuleInit {
     });
   }
 
+  /** `supabase` sigue siendo el valor por defecto: nadie se migra sin querer. */
+  private resolveDriver(raw: string | undefined): StorageDriver {
+    if (raw === 'local' || raw === 's3') {
+      return raw;
+    }
+
+    return 'supabase';
+  }
+
   async onModuleInit(): Promise<void> {
+    if (this.driver === 's3') {
+      try {
+        await this.getS3().send(new HeadBucketCommand({ Bucket: this.bucket }));
+        this.reachable = true;
+        this.logger.log(
+          `Almacén de imágenes S3 conectado. Bucket "${this.bucket}"`,
+        );
+      } catch (error) {
+        // Mismo criterio que abajo: se avisa y se sigue. Que no se pueda
+        // subir una imagen no puede impedir que se cobre un pedido.
+        this.reachable = false;
+        this.logger.error(
+          `No se pudo conectar con el bucket público "${this.bucket}": ${this.toMessage(
+            error,
+          )} — la aplicación arranca igual, pero subir imágenes responderá 503.`,
+        );
+      }
+      return;
+    }
+
     if (this.driver === 'local') {
       await mkdir(join(process.cwd(), LOCAL_UPLOADS_DIR, 'drawings'), {
         recursive: true,
@@ -151,6 +245,10 @@ export class StorageService implements OnModuleInit {
       return this.uploadToDisk(file, storagePath);
     }
 
+    if (this.driver === 's3') {
+      return this.uploadToS3(file, storagePath);
+    }
+
     const { error } = await this.getSupabase()
       .storage.from(this.bucket)
       .upload(storagePath, file.buffer, {
@@ -196,6 +294,20 @@ export class StorageService implements OnModuleInit {
       return;
     }
 
+    if (this.driver === 's3') {
+      try {
+        await this.getS3().send(
+          new DeleteObjectCommand({ Bucket: this.bucket, Key: storagePath }),
+        );
+      } catch (error) {
+        this.logger.error(`Borrado en S3 falló: ${this.toMessage(error)}`);
+        throw new InternalServerErrorException(
+          'No se pudo borrar la imagen asociada',
+        );
+      }
+      return;
+    }
+
     const { error } = await this.getSupabase()
       .storage.from(this.bucket)
       .remove([storagePath]);
@@ -227,6 +339,49 @@ export class StorageService implements OnModuleInit {
       this.logger.error(`Local upload failed: ${this.toMessage(error)}`);
       throw new InternalServerErrorException('No se pudo subir la imagen');
     }
+  }
+
+  /**
+   * Sube al bucket público.
+   *
+   * No se manda ACL a propósito: R2 no las admite y en B2 la visibilidad es
+   * del bucket, no del objeto. Lo público lo decide el bucket, que además es
+   * lo que se puede auditar de un vistazo en vez de objeto por objeto.
+   */
+  private async uploadToS3(
+    file: Express.Multer.File,
+    storagePath: string,
+  ): Promise<StoredFile> {
+    try {
+      await this.getS3().send(
+        new PutObjectCommand({
+          Body: file.buffer,
+          Bucket: this.bucket,
+          // Sin esto el navegador se descarga la imagen en vez de mostrarla:
+          // S3 sirve `application/octet-stream` cuando no se le dice nada.
+          ContentType: file.mimetype,
+          Key: storagePath,
+        }),
+      );
+
+      return {
+        imageUrl: `${this.s3PublicBaseUrl}/${storagePath}`,
+        storagePath,
+      };
+    } catch (error) {
+      this.logger.error(`Subida a S3 falló: ${this.toMessage(error)}`);
+      throw new InternalServerErrorException('No se pudo subir la imagen');
+    }
+  }
+
+  private getS3(): S3Client {
+    if (!this.s3) {
+      throw new InternalServerErrorException(
+        'El almacén de imágenes S3 no está configurado',
+      );
+    }
+
+    return this.s3;
   }
 
   private getSupabase(): ReturnType<typeof createClient> {

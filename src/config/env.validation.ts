@@ -17,9 +17,9 @@ export function validateEnvironment(
   const storageDriver =
     (config['STORAGE_DRIVER'] as string | undefined) ?? 'supabase';
 
-  if (!['supabase', 'local'].includes(storageDriver)) {
+  if (!['supabase', 's3', 'local'].includes(storageDriver)) {
     errors.push(
-      `STORAGE_DRIVER must be supabase or local (got: "${storageDriver}")`,
+      `STORAGE_DRIVER must be supabase, s3 or local (got: "${storageDriver}")`,
     );
   }
 
@@ -51,6 +51,47 @@ export function validateEnvironment(
       'SUPABASE_SERVICE_ROLE_KEY',
       'SUPABASE_STORAGE_BUCKET',
     );
+  }
+
+  // Igual con S3: se exige aquí para que un despliegue mal configurado falle
+  // al arrancar, y no la primera vez que alguien intente subir un dibujo.
+  if (storageDriver === 's3') {
+    requiredStrings.push('S3_PUBLIC_BASE_URL', 'S3_PUBLIC_BUCKET');
+
+    // Endpoint y credenciales pueden ser propios del bucket público o
+    // heredarse del privado. Se exige el par completo, venga de donde venga.
+    const heredado = (propia: string, comun: string) =>
+      config[propia] ?? config[comun];
+
+    for (const [propia, comun] of [
+      ['S3_PUBLIC_ACCESS_KEY_ID', 'S3_ACCESS_KEY_ID'],
+      ['S3_PUBLIC_ENDPOINT', 'S3_ENDPOINT'],
+      ['S3_PUBLIC_SECRET_ACCESS_KEY', 'S3_SECRET_ACCESS_KEY'],
+    ] as const) {
+      if (!heredado(propia, comun)) {
+        errors.push(
+          `${propia} (or ${comun}) is required when STORAGE_DRIVER=s3`,
+        );
+      }
+    }
+
+    // El bucket de las imágenes es público; el de los drumkits, privado.
+    // Confundirlos deja los productos de pago descargables sin firmar. Se
+    // comparan bucket y endpoint juntos: el mismo nombre en dos proveedores
+    // distintos no es la misma caja.
+    const mismoEndpoint =
+      (config['S3_PUBLIC_ENDPOINT'] ?? config['S3_ENDPOINT']) ===
+      config['S3_ENDPOINT'];
+
+    if (
+      config['S3_PUBLIC_BUCKET'] &&
+      config['S3_PUBLIC_BUCKET'] === config['S3_BUCKET'] &&
+      mismoEndpoint
+    ) {
+      errors.push(
+        'S3_PUBLIC_BUCKET must differ from S3_BUCKET — S3_BUCKET holds paid downloads and must stay private',
+      );
+    }
   }
 
   for (const key of requiredStrings) {

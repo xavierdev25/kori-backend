@@ -1,7 +1,7 @@
 import type { ServerResponse } from 'http';
 import { join } from 'path';
 
-import { VERSION_NEUTRAL, VersioningType } from '@nestjs/common';
+import { Logger, VERSION_NEUTRAL, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import compression from 'compression';
@@ -10,6 +10,10 @@ import * as Sentry from '@sentry/node';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import {
+  buildAllowedOrigins,
+  isOriginAllowed,
+} from './common/http/cors-origins';
 import { LOCAL_UPLOADS_DIR } from './modules/storage/storage.service';
 
 type CorsOriginCallback = (error: Error | null, allow?: boolean) => void;
@@ -75,10 +79,18 @@ async function bootstrap() {
     }
   }
 
-  const allowedOrigins = [
+  const logger = new Logger('Bootstrap');
+  const allowedOrigins = buildAllowedOrigins([
     configService.get<string>('LANDING_ORIGIN'),
     configService.get<string>('DASHBOARD_ORIGIN'),
-  ].filter((origin): origin is string => Boolean(origin));
+  ]);
+
+  // Se registra al arrancar: cuando el CORS falla, el navegador dice
+  // "sin cabecera" y el servidor no dice nada. Tener la lista en el log
+  // convierte media hora de adivinar en una línea.
+  logger.log(
+    `CORS permitido para: ${allowedOrigins.join(', ') || '(ninguno)'}`,
+  );
 
   app.use(helmet());
 
@@ -96,12 +108,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: (origin: string | undefined, callback: CorsOriginCallback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(null, false);
+      callback(null, isOriginAllowed(origin, allowedOrigins));
     },
     // Sin esto el navegador no envía ni acepta las cookies de sesión del
     // panel. Es seguro porque el origen va por allowlist, nunca '*': la
