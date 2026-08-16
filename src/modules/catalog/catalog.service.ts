@@ -59,6 +59,12 @@ export class CatalogService {
               isActive: true,
               providerProductUid: true,
               printFileUrl: true,
+              // Sin esto el panel no puede saber que a un producto digital le
+              // falta el archivo, que es exactamente la regla que aplica
+              // `assertProductIsPublishable`. Es una ruta interna del bucket
+              // privado, nunca una URL descargable, y este endpoint ya exige
+              // sesión de administrador.
+              digitalAssetPath: true,
             },
           },
           _count: { select: { variants: true } },

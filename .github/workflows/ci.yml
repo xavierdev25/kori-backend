@@ -56,6 +56,13 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # Tiene que ir despues del build: mira el codigo YA compilado, que es lo
+      # unico donde se ve lo que inyectan los plugins de nest-cli.json. El
+      # fuente puede estar limpio y el compilado no, y eso fue exactamente lo
+      # que tumbo produccion seis horas.
+      - name: Check compiled imports against production dependencies
+        run: pnpm run check:prod-imports
+
       # Bloqueante: lo que de verdad viaja en el contenedor. El Dockerfile
       # instala con --prod, asi que una vulnerabilidad en jest o eslint no
       # llega a produccion y no deberia impedir un despliegue.

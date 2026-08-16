@@ -28,7 +28,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "admin:password": "ts-node -T prisma/set-admin-password.ts",
-    "load-test": "ts-node -T scripts/load-test.ts"
+    "load-test": "ts-node -T scripts/load-test.ts",
+    "check:prod-imports": "node scripts/check-prod-imports.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1106.0",
