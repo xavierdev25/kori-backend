@@ -2,10 +2,11 @@ name: Outbox sweep
 
 # Vacia la cola de trabajos pendientes (correos, envio a produccion).
 #
-# Por que hace falta un cron externo: el temporizador interno del backend
-# muere cuando Render duerme el contenedor a los 15 min. Si nadie visita la
-# tienda, un pedido pagado se quedaria encolado indefinidamente y el comprador
-# no recibiria ni su confirmacion.
+# Por que hace falta un cron externo: nacio porque Render dormia el contenedor
+# a los 15 min y con el moria el temporizador interno. En EC2 el proceso ya no
+# se duerme, pero esto se conserva como red de seguridad: si el contenedor se
+# reinicia o se queda colgado, un pedido pagado se quedaria encolado y el
+# comprador no recibiria ni su confirmacion. Barrer de mas no cuesta nada.
 #
 # OJO con las limitaciones de GitHub Actions (las mismas que el keep-alive):
 # el cron se retrasa con frecuencia y GitHub desactiva los workflows
@@ -40,13 +41,15 @@ jobs:
           # Igual que en alerts: sin secreto todavia no esta configurado.
           if [ -z "${INTERNAL_TASK_SECRET:-}" ]; then
             echo "::warning::INTERNAL_TASK_SECRET no configurado: barrido inactivo."
-            echo "Anadelo en Settings > Secrets con el mismo valor que en Render."
+            echo "Anadelo en Settings > Secrets con el mismo valor que hay en"
+            echo "/home/ec2-user/.env dentro de la instancia EC2."
             exit 0
           fi
 
           url="${BACKEND_URL%/}/internal/outbox/run"
 
-          # El primer intento puede tardar ~50 s si Render estaba dormido.
+          # EC2 no se duerme, pero un despliegue en curso deja la API sin
+          # responder unos segundos: por eso se reintenta.
           for attempt in 1 2 3; do
             echo "::group::Intento $attempt"
             body=$(curl -sS --max-time 120 -w '\n%{http_code}' -X POST "$url" \
@@ -67,12 +70,13 @@ jobs:
                 ;;
               503)
                 echo "::error::El backend no tiene INTERNAL_TASK_SECRET configurado."
-                echo "Anadelo como variable de entorno en Render (Environment)."
+                echo "Anadelo a /home/ec2-user/.env en la instancia y levanta con"
+                echo "  docker compose up -d    (restart NO recarga env_file)"
                 echo "Tenerlo solo en los secrets de GitHub no basta: hacen falta los dos."
                 exit 1
                 ;;
               403)
-                echo "::error::El secreto de GitHub no coincide con el de Render."
+                echo "::error::El secreto de GitHub no coincide con el del contenedor."
                 echo "Genera uno nuevo y ponlo IGUAL en ambos sitios:"
                 echo "  openssl rand -base64 36"
                 exit 1
@@ -92,6 +96,9 @@ jobs:
           done
 
           echo "::error::El barrido no respondio 200 tras 3 intentos."
-          echo "Revisa: (1) INTERNAL_TASK_SECRET coincide con el de Render,"
-          echo "        (2) el servicio esta arriba, (3) los logs de Render."
+          echo "Revisa, en la instancia EC2 (por SSM, no hace falta SSH):"
+          echo "  docker compose ps        - el contenedor esta en Restarting?"
+          echo "  docker compose logs api  - por que murio"
+          echo "Y que INTERNAL_TASK_SECRET sea el mismo en el secret de GitHub"
+          echo "y en /home/ec2-user/.env."
           exit 1

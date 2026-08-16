@@ -38,13 +38,15 @@ jobs:
           # despliegue solo ensena a ignorar las alertas de verdad.
           if [ -z "${INTERNAL_TASK_SECRET:-}" ]; then
             echo "::warning::INTERNAL_TASK_SECRET no configurado: vigilancia inactiva."
-            echo "Anadelo en Settings > Secrets con el mismo valor que en Render."
+            echo "Anadelo en Settings > Secrets con el mismo valor que hay en"
+            echo "/home/ec2-user/.env dentro de la instancia EC2."
             exit 0
           fi
 
           url="${BACKEND_URL%/}/internal/outbox/alerts"
 
-          # Render puede estar dormido: el primer intento tarda ~50 s.
+          # EC2 no se duerme, pero un despliegue en curso deja la API sin
+          # responder unos segundos: se reintenta para no alertar por eso.
           for attempt in 1 2 3; do
             echo "::group::Intento $attempt"
             body=$(curl -sS --max-time 120 -w '\n%{http_code}' \
@@ -65,12 +67,13 @@ jobs:
                 ;;
               503)
                 echo "::error::El backend no tiene INTERNAL_TASK_SECRET configurado."
-                echo "Anadelo como variable de entorno en Render (Environment)."
+                echo "Anadelo a /home/ec2-user/.env en la instancia y levanta con"
+                echo "  docker compose up -d    (restart NO recarga env_file)"
                 echo "Tenerlo solo en los secrets de GitHub no basta: hacen falta los dos."
                 exit 1
                 ;;
               403)
-                echo "::error::El secreto de GitHub no coincide con el de Render."
+                echo "::error::El secreto de GitHub no coincide con el del contenedor."
                 echo "Genera uno nuevo y ponlo IGUAL en ambos sitios:"
                 echo "  openssl rand -base64 36"
                 exit 1

@@ -604,6 +604,99 @@ describe('Kori backend (e2e)', () => {
     expect(storageServiceMock.deleteFile).not.toHaveBeenCalled();
   });
 
+  // ── Auditoria ───────────────────────────────────────────────────────────────
+  //
+  // El interceptor estaba registrado globalmente desde hacia tiempo pero nunca
+  // se habia comprobado que escribiera nada. Un registro de auditoria que no
+  // registra es peor que no tenerlo: se confia en el justo el dia que hay que
+  // averiguar quien borro que.
+
+  it('una escritura autenticada deja rastro en la auditoria', async () => {
+    const note = createNote({
+      id: textNoteId,
+      type: NoteType.TEXT,
+      message: 'hola',
+      imageUrl: null,
+      storagePath: null,
+      color: 'yellow',
+    });
+    prismaMock.note.findUnique.mockResolvedValueOnce(note);
+    prismaMock.note.delete.mockResolvedValueOnce(note);
+
+    const accessToken = await getAccessToken(httpServer, validPassword);
+    prismaMock.auditLog.create.mockClear();
+
+    await request(httpServer)
+      .delete(`/admin/notes/${textNoteId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    // El registro se escribe fuera del ciclo de la peticion (`tap` + promesa
+    // sin esperar, para no retrasar la respuesta): hay que dejarlo terminar.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(prismaMock.auditLog.create).toHaveBeenCalledTimes(1);
+
+    const argumento = prismaMock.auditLog.create.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+
+    expect(argumento.data).toMatchObject({
+      action: 'DELETE /admin/notes/:id',
+      entity: 'note',
+      entityId: textNoteId,
+      userEmail: ADMIN_EMAIL,
+      userRole: 'ADMIN',
+    });
+  });
+
+  it('las lecturas no se auditan', async () => {
+    // Auditar los GET llenaria la tabla de ruido y enterraria los cambios,
+    // que es lo unico que hay que poder reconstruir.
+    const accessToken = await getAccessToken(httpServer, validPassword);
+    prismaMock.auditLog.create.mockClear();
+
+    await request(httpServer)
+      .get('/admin/notes')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(prismaMock.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('un intento sin sesion no se audita', async () => {
+    // Sin usuario no hay a quien atribuirselo. Los 401 son cosa del log de
+    // acceso, no del registro de cambios.
+    prismaMock.auditLog.create.mockClear();
+
+    await request(httpServer).delete(`/admin/notes/${textNoteId}`).expect(401);
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(prismaMock.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('la auditoria nunca guarda la contrasena', async () => {
+    // /auth/login es un POST con la contrasena en el cuerpo. Aunque hoy no se
+    // audite por no llevar sesion, si algun dia se auditara no puede acabar
+    // guardada en claro: eso convertiria la tabla en un deposito de
+    // credenciales.
+    prismaMock.auditLog.create.mockClear();
+
+    await request(httpServer)
+      .post('/auth/login')
+      .send({ email: ADMIN_EMAIL, password: validPassword })
+      .expect(201);
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    for (const llamada of prismaMock.auditLog.create.mock.calls) {
+      expect(JSON.stringify(llamada)).not.toContain(validPassword);
+    }
+  });
+
   it('DELETE /admin/notes/:id deletes a DRAWING note and its storage file', async () => {
     const note = createNote({
       id: drawingNoteId,

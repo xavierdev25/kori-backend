@@ -37,8 +37,8 @@ jobs:
 
           url="${BACKEND_URL%/}/health/readiness"
 
-          # El primer intento puede tardar ~50 s si Render estaba dormido:
-          # timeout amplio y reintentos con espera creciente.
+          # EC2 no se duerme: los reintentos cubren un despliegue en curso,
+          # no un arranque en frio.
           for attempt in 1 2 3 4; do
             echo "::group::Intento $attempt"
             body=$(curl -sS --max-time 120 -w '\n%{http_code}' "$url" 2>&1) && rc=0 || rc=$?
@@ -61,5 +61,9 @@ jobs:
           done
 
           echo "::error::El backend no respondio con la DB accesible tras 4 intentos."
-          echo "Revisa: (1) proyecto de Supabase pausado, (2) DATABASE_URL/DIRECT_URL en Render, (3) logs del servicio."
+          echo "Revisa, en la instancia EC2 (por SSM, no hace falta SSH):"
+          echo "  docker compose ps        - el contenedor esta en Restarting?"
+          echo "  docker compose logs api  - por que murio"
+          echo "Si son credenciales: DATABASE_URL/DIRECT_URL en /home/ec2-user/.env,"
+          echo "y despues docker compose up -d (restart NO recarga env_file)."
           exit 1
