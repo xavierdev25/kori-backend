@@ -31,6 +31,8 @@ export function normalizeLocale(raw: string | null | undefined): Locale {
 interface EmailStrings {
   access: {
     body: string;
+    /** Etiqueta del botón. Corta y en imperativo: es lo que se pulsa. */
+    cta: string;
     expiry: (minutes: number) => string;
     ignore: string;
     subject: string;
@@ -66,15 +68,19 @@ interface EmailStrings {
 const es: EmailStrings = {
   access: {
     body: 'Aquí tienes el enlace para ver tus compras y volver a descargarlas:',
+    cta: 'Ver mis compras',
     expiry: (minutes) => `El enlace vale ${minutes} minutos.`,
     ignore: 'Si no lo pediste tú, ignora este correo: no hace falta nada más.',
     subject: 'Tus compras en Kori',
   },
   confirmation: {
+    // Texto neutro a propósito: este correo lo recibe cualquier pedido. El
+    // que dice "descarga tus archivos" es el siguiente, y solo llega si el
+    // pedido lleva algo digital. Prometer aquí una descarga rompería en
+    // cuanto vuelva a haber algo físico que enviar.
     body: [
-      'Gracias por tu compra. Ya recibimos tu pago y tu pedido entró en',
-      'producción: cada prenda se imprime bajo pedido, así que tarda unos',
-      'días más que algo que ya está en un almacén.',
+      'Gracias por tu compra. Ya recibimos tu pago y tu pedido está',
+      'confirmado. Abajo tienes el detalle de lo que llevas.',
     ],
     greeting: (name) => `Hola${name ? ` ${name}` : ''},`,
     orderLabel: (orderNumber) => `PEDIDO #${orderNumber}`,
@@ -107,15 +113,15 @@ const es: EmailStrings = {
 const en: EmailStrings = {
   access: {
     body: 'Here is the link to see your purchases and download them again:',
+    cta: 'See my purchases',
     expiry: (minutes) => `The link is valid for ${minutes} minutes.`,
     ignore: "If you didn't ask for this, just ignore this email.",
     subject: 'Your Kori purchases',
   },
   confirmation: {
     body: [
-      'Thanks for your order. We received your payment and it is now in',
-      'production: every garment is printed to order, so it takes a few more',
-      'days than something sitting in a warehouse.',
+      'Thanks for your order. We received your payment and everything is',
+      'confirmed. Here is what you got.',
     ],
     greeting: (name) => `Hi${name ? ` ${name}` : ''},`,
     orderLabel: (orderNumber) => `ORDER #${orderNumber}`,

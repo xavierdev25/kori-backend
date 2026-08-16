@@ -119,6 +119,42 @@ async function bootstrap() {
     exposedHeaders: ['x-request-id', 'ETag'],
   });
 
+  /**
+   * El contrato de la API, generado desde los DTO que ya existen.
+   *
+   * Solo fuera de producción, y es deliberado: publicar el mapa completo de
+   * endpoints —incluidos los de `/admin` y `/internal`— le ahorra el trabajo
+   * de reconocimiento a quien venga a buscar agujeros. Para el panel y la web
+   * el contrato se consulta en local o se exporta a fichero; en el servidor
+   * de verdad no hace falta que esté servido.
+   */
+  if (configService.get<string>('NODE_ENV') !== 'production') {
+    const { DocumentBuilder, SwaggerModule } = await import('@nestjs/swagger');
+
+    const config = new DocumentBuilder()
+      .setTitle('Kori API')
+      .setDescription(
+        'API de la tienda de kor!. Los precios se leen siempre del servidor: ' +
+          'ningún endpoint acepta un importe enviado por el cliente.',
+      )
+      .setVersion('1.0')
+      .addCookieAuth('kori_access_token', {
+        type: 'apiKey',
+        in: 'cookie',
+        description: 'Sesión del panel. Se obtiene en POST /auth/login.',
+      })
+      .build();
+
+    SwaggerModule.setup(
+      'docs',
+      app,
+      SwaggerModule.createDocument(app, config),
+      { jsonDocumentUrl: 'docs/openapi.json' },
+    );
+
+    logger.log('Contrato de la API en /docs (solo fuera de producción)');
+  }
+
   const port = Number(configService.get<string>('PORT') ?? 4000);
   await app.listen(port);
 }

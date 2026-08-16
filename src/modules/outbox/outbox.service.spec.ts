@@ -163,7 +163,7 @@ describe('OutboxService', () => {
       emails.sendOrderConfirmation.mockRejectedValue(new Error('Resend caído'));
     });
 
-    it('reintenta con backoff exponencial', async () => {
+    it('reintenta con backoff exponencial dentro de su ventana', async () => {
       prisma.outboxJob.findUniqueOrThrow.mockResolvedValue({
         attempts: 2,
         maxAttempts: 5,
@@ -179,10 +179,40 @@ describe('OutboxService', () => {
       expect(summary.retrying).toBe(1);
       expect(retry.data.status).toBe('PENDING');
       expect(retry.data.attempts).toBe(3);
-      // 3er intento → 4 minutos
+
+      // 3er intento: techo de 4 minutos, y el azar lo reparte entre el 25 %
+      // y el 100 % de esa ventana. Se comprueba el rango, no un valor fijo:
+      // un backoff con jitter que diera siempre lo mismo no sería jitter.
       const delay = retry.data.nextAttemptAt.getTime() - Date.now();
-      expect(delay).toBeGreaterThan(3.5 * 60_000);
-      expect(delay).toBeLessThan(4.5 * 60_000);
+      expect(delay).toBeGreaterThanOrEqual(0.25 * 4 * 60_000 - 1_000);
+      expect(delay).toBeLessThanOrEqual(4 * 60_000);
+    });
+
+    it('dos trabajos que fallan a la vez NO reintentan a la vez', async () => {
+      // Esto es todo el sentido del jitter. Sin él, una caída de Stripe hace
+      // que todos los trabajos pendientes vuelvan en bloque en el mismo
+      // instante, machacando un servicio que ya está mal.
+      prisma.outboxJob.findUniqueOrThrow.mockResolvedValue({
+        attempts: 3,
+        maxAttempts: 5,
+        type: 'SEND_ORDER_CONFIRMATION',
+      });
+
+      const esperas = new Set<number>();
+
+      for (let i = 0; i < 12; i++) {
+        prisma.outboxJob.update.mockClear();
+        await service.runPending();
+
+        const { data } = callArg<{ data: { nextAttemptAt: Date } }>(
+          prisma.outboxJob.update,
+        );
+        esperas.add(data.nextAttemptAt.getTime());
+      }
+
+      // Con doce intentos, que salieran todos iguales sería imposible por
+      // azar: significaría que el jitter no está.
+      expect(esperas.size).toBeGreaterThan(1);
     });
 
     it('guarda el error para poder diagnosticar', async () => {

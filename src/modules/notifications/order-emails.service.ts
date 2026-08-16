@@ -2,6 +2,12 @@ import { Injectable } from '@nestjs/common';
 import type { FulfillmentOrder, Order, OrderItem } from '@prisma/client';
 
 import { formatMoney } from '../../common/money/currency';
+import {
+  escaparHtml,
+  filasDeImporte,
+  listaDeEnlaces,
+  renderizarCorreo,
+} from './email-layout';
 import { t } from './i18n/email-messages';
 import { EmailService, type EmailMessage } from './email.service';
 
@@ -15,9 +21,13 @@ const money = (cents: number): string => formatMoney(cents);
 /**
  * Redacción de los correos de la tienda.
  *
- * Todo en texto plano y en español de México, a propósito: llega a la bandeja
- * principal con más facilidad que un HTML pesado, se lee igual en cualquier
- * cliente, y para tres correos no compensa mantener plantillas.
+ * Cada correo se manda en HTML y en texto plano a la vez. El texto no es un
+ * resto del pasado: un correo que solo lleva HTML puntúa peor en los filtros
+ * de spam, y hay quien lee el correo en texto. Los dos dicen lo mismo, y el
+ * texto se construye primero para que no se pueda quedar atrás.
+ *
+ * Las alertas al admin siguen siendo solo texto: nadie necesita un correo
+ * maquetado para enterarse de que hay un pedido atascado.
  *
  * Los importes salen de las copias congeladas del pedido, nunca del precio
  * actual del producto.
@@ -84,6 +94,19 @@ export class OrderEmailsService {
         '',
         `— ${t(order.locale).signature}`,
       ].join('\n'),
+      html: renderizarCorreo(
+        {
+          avance: m.body,
+          titulo: m.thanks,
+          parrafos: [escaparHtml(m.body)],
+          // Los enlaces van escritos enteros y no detrás de un botón: son
+          // varios archivos, cada uno con su nombre, y quien reenvíe el
+          // correo o lo lea en texto tiene que poder copiarlos.
+          bloque: listaDeEnlaces(enlaces),
+          nota: `${escaparHtml(m.expiry(horasDeCaducidad, descargasMaximas))}<br>${escaparHtml(m.ifExpired)}`,
+        },
+        escaparHtml(t(order.locale).signature),
+      ),
       to: order.customerEmail,
     });
   }
@@ -112,6 +135,20 @@ export class OrderEmailsService {
         '',
         `— ${t(locale).signature}`,
       ].join('\n'),
+      html: renderizarCorreo(
+        {
+          avance: m.body,
+          titulo: m.subject,
+          parrafos: [escaparHtml(m.body)],
+          boton: { texto: m.cta, url },
+          // El enlace también en claro bajo el botón: hay clientes que no
+          // pintan el botón, y quien pidió esto ya tuvo un problema antes.
+          // Que no se quede mirando un correo sin nada donde pulsar.
+          bloque: `<a href="${url}" style="color:#e8657f;word-break:break-all;">${escaparHtml(url)}</a>`,
+          nota: `${escaparHtml(m.expiry(minutosDeVida))}<br>${escaparHtml(m.ignore)}`,
+        },
+        escaparHtml(t(locale).signature),
+      ),
       to,
     });
   }
@@ -153,6 +190,34 @@ export class OrderEmailsService {
         `  ${money(item.lineTotalCents)}`,
     );
 
+    const articulos = order.items
+      .map(
+        (item) =>
+          `<div style="margin:0 0 10px;">${item.quantity} × ${escaparHtml(item.productName)}` +
+          `<br><span style="color:#9a9e91;">${escaparHtml(item.variantLabel)} — ${money(item.lineTotalCents)}</span></div>`,
+      )
+      .join('');
+
+    // Un pedido de puras descargas no se envía a ninguna parte. Enseñarle
+    // "ENVIAREMOS A" y prometerle un número de rastreo a quien acaba de
+    // comprar un drumkit es prometer algo que no va a llegar nunca.
+    const hayEnvio = Boolean(order.shipLine1);
+
+    const importes = filasDeImporte([
+      { concepto: m.subtotal, importe: money(order.subtotalCents) },
+      ...(hayEnvio
+        ? [
+            order.shippingCents > 0
+              ? {
+                  concepto: m.shippingLabel,
+                  importe: money(order.shippingCents),
+                }
+              : { concepto: m.shippingFree, importe: '—' },
+          ]
+        : []),
+      { concepto: m.total, importe: money(order.totalCents), fuerte: true },
+    ]);
+
     return {
       to: order.customerEmail,
       subject: m.subject(order.orderNumber),
@@ -165,18 +230,36 @@ export class OrderEmailsService {
         ...lines,
         '',
         `${m.subtotal} ${money(order.subtotalCents)}`,
-        order.shippingCents > 0
-          ? `${m.shippingLabel} ${money(order.shippingCents)}`
-          : m.shippingFree,
+        ...(hayEnvio
+          ? [
+              order.shippingCents > 0
+                ? `${m.shippingLabel} ${money(order.shippingCents)}`
+                : m.shippingFree,
+            ]
+          : []),
         `${m.total} ${money(order.totalCents)}`,
-        '',
-        m.shipTo,
-        this.formatAddress(order),
-        '',
-        m.trackingSoon,
+        ...(hayEnvio
+          ? ['', m.shipTo, this.formatAddress(order), '', m.trackingSoon]
+          : []),
         '',
         t(order.locale).signature,
       ].join('\n'),
+      html: renderizarCorreo(
+        {
+          avance: m.orderLabel(order.orderNumber),
+          titulo: m.greeting(order.customerName),
+          // `body` viene partido en líneas para que el texto plano no salga
+          // con renglones kilométricos. En HTML el navegador ya ajusta solo,
+          // así que se vuelven a unir: un `<p>` por línea dejaba huecos a
+          // media frase.
+          parrafos: [escaparHtml(m.body.join(' '))],
+          bloque: `<p style="margin:0 0 14px;font-weight:bold;">${escaparHtml(m.orderLabel(order.orderNumber))}</p>${articulos}<div style="margin-top:16px;">${importes}</div>`,
+          nota: hayEnvio
+            ? `${escaparHtml(m.shipTo)}<br>${escaparHtml(this.formatAddress(order)).replace(/\n/g, '<br>')}<br><br>${escaparHtml(m.trackingSoon)}`
+            : undefined,
+        },
+        escaparHtml(t(order.locale).signature),
+      ),
     };
   }
 

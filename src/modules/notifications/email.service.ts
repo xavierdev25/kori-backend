@@ -7,7 +7,16 @@ import { Resend } from 'resend';
 export interface EmailMessage {
   to: string;
   subject: string;
+  /**
+   * La versión en texto plano. Obligatoria aunque haya HTML.
+   *
+   * No es un resto del pasado: un correo que solo lleva HTML puntúa peor en
+   * los filtros de spam, y hay quien lee el correo en texto por elección o
+   * por lector de pantalla. Va siempre, y dice lo mismo que el HTML.
+   */
   text: string;
+  /** Opcional: las alertas internas no necesitan maquetación. */
+  html?: string;
 }
 
 /** Un envio que tarda mas que esto se da por perdido y el job reintenta. */
@@ -105,6 +114,7 @@ export class EmailService implements OnModuleInit {
           from: this.from,
           subject: message.subject,
           text: message.text,
+          ...(message.html ? { html: message.html } : {}),
           to: message.to,
         }),
       ),

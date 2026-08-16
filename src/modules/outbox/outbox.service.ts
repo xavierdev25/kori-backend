@@ -309,8 +309,29 @@ export class OutboxService {
     }
   }
 
+  /**
+   * Espera creciente con azar.
+   *
+   * Lo importante es el azar, no la curva. Sin él, todos los trabajos que
+   * fallaron a la vez —porque Stripe o Resend estuvieron caídos un rato—
+   * reintentan exactamente en el mismo instante, y otra vez, y otra: se
+   * golpea en bloque a un servicio que justamente está mal, y el
+   * cortacircuitos se reabre solo para volver a cerrarse.
+   *
+   * Se usa "full jitter": un valor al azar entre cero y el techo de esa
+   * tentativa. Reparte los reintentos a lo largo de toda la ventana en vez de
+   * amontonarlos, y de paso hace que dos trabajos que empezaron juntos dejen
+   * de ir sincronizados para siempre.
+   */
   private backoffMs(attempts: number): number {
-    return Math.min(BASE_BACKOFF_MS * 2 ** (attempts - 1), MAX_BACKOFF_MS);
+    const techo = Math.min(
+      BASE_BACKOFF_MS * 2 ** (attempts - 1),
+      MAX_BACKOFF_MS,
+    );
+
+    // Con suelo de un cuarto del techo: sin él, un `Math.random()` bajo
+    // devolvería un reintento casi inmediato, que es lo contrario de esperar.
+    return Math.round(techo * (0.25 + Math.random() * 0.75));
   }
 
   /** Encola un trabajo sin duplicar si ya existe. */

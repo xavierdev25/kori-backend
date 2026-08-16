@@ -13,6 +13,9 @@ import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { LatencyInterceptor } from './common/interceptors/latency.interceptor';
+import { LatencyController } from './common/observability/latency.controller';
+import { LatencyRegistry } from './common/observability/latency.registry';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -26,6 +29,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { PrismaService } from './modules/prisma/prisma.service';
 import { SettingsModule } from './modules/settings/settings.module';
+import { TelemetryModule } from './modules/telemetry/telemetry.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { SubscribersModule } from './modules/subscribers/subscribers.module';
 
@@ -47,6 +51,7 @@ import { SubscribersModule } from './modules/subscribers/subscribers.module';
     NotesModule,
     SubscribersModule,
     SettingsModule,
+    TelemetryModule,
     AuthModule,
     AdminModule,
     CatalogModule,
@@ -57,6 +62,7 @@ import { SubscribersModule } from './modules/subscribers/subscribers.module';
     OutboxModule,
     HealthModule,
   ],
+  controllers: [LatencyController],
   providers: [
     {
       provide: APP_PIPE,
@@ -89,6 +95,15 @@ import { SubscribersModule } from './modules/subscribers/subscribers.module';
       useFactory: (prisma: PrismaService, configService: ConfigService) =>
         new AuditInterceptor(prisma, configService),
       inject: [PrismaService, ConfigService],
+    },
+    // Mide TODAS las peticiones, incluidas las públicas: si la tienda va
+    // lenta para quien compra, es justo lo que hay que poder ver.
+    LatencyRegistry,
+    {
+      provide: APP_INTERCEPTOR,
+      useFactory: (registry: LatencyRegistry) =>
+        new LatencyInterceptor(registry),
+      inject: [LatencyRegistry],
     },
   ],
 })
