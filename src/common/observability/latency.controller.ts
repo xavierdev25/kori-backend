@@ -6,7 +6,6 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiExcludeController } from '@nestjs/swagger';
 
 import { AuthService } from '../../modules/auth/auth.service';
 import { LatencyRegistry } from './latency.registry';
@@ -21,8 +20,13 @@ import { LatencyRegistry } from './latency.registry';
  *
  * Comparación en tiempo constante para el secreto, como en el resto: comparar
  * cadenas con `===` filtra información por el tiempo que tarda en fallar.
+ *
+ * Sin decorador de Swagger a propósito: eso obligaría a importar el paquete
+ * de forma estática, y `@nestjs/swagger` es dependencia de DESARROLLO —el
+ * contrato solo se sirve fuera de producción—. Que este endpoint salga en el
+ * contrato local no molesta: solo lo ve quien desarrolla, y sigue exigiendo
+ * el secreto igual.
  */
-@ApiExcludeController()
 @Controller('internal/metrics')
 export class LatencyController {
   constructor(

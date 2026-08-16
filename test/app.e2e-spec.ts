@@ -146,7 +146,14 @@ describe('Kori backend (e2e)', () => {
       .useValue(storageServiceMock)
       .compile();
 
-    app = moduleFixture.createNestApplication();
+    // `logger: false` porque la aplicación instala el suyo al crearse y
+    // pisaría el silenciador global de `jest-silence-logger`. Estos tests
+    // ejercitan a propósito caminos de error —la sonda con la base caída, un
+    // webhook con firma falsa— y sus ERROR esperados tapaban los fallos de
+    // verdad. Con `LOGS=1` vuelven a verse.
+    app = moduleFixture.createNestApplication(
+      process.env.LOGS ? undefined : { logger: false },
+    );
     await app.init();
     httpServer = app.getHttpServer() as App;
   });
