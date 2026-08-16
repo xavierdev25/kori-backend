@@ -192,8 +192,28 @@ describe('Kori backend (e2e)', () => {
       checks?: { database?: unknown };
     };
 
+    // `status` responde a "¿puede atender tráfico?", y eso depende de la base
+    // de datos. Un almacén caído no lo cambia: se refleja en `degraded`.
     expect(body.status).toBe('ok');
     expect(body.checks?.database).toBe('ok');
+  });
+
+  it('GET /health/readiness reports each storage separately', async () => {
+    const response = await request(httpServer)
+      .get('/health/readiness')
+      .expect(200);
+    const body = response.body as {
+      degraded?: unknown;
+      checks?: { images?: unknown; digitalAssets?: unknown };
+    };
+
+    // Antes esto era la cadena fija 'startup-validated', que no comprobaba
+    // nada: el backend estuvo días diciendo que todo iba bien mientras el
+    // almacén de los drumkits no estaba ni configurado. Ahora cada almacén
+    // dice su estado y `degraded` resume si hay algo que mirar.
+    expect(body.checks).toHaveProperty('images');
+    expect(body.checks).toHaveProperty('digitalAssets');
+    expect(typeof body.degraded).toBe('boolean');
   });
 
   it('GET /health/readiness returns 503 when DB is down', async () => {

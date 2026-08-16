@@ -50,14 +50,18 @@ export class HealthController {
       ? 'ok'
       : 'not-configured';
 
-    // Se responde 200 aunque un almacen este caido, a proposito. Devolver
-    // 503 sacaria de servicio la API entera —pedidos, muro, panel— por algo
-    // que solo afecta a una parte. Pero el cuerpo lo dice, y `degraded` es
-    // lo que hay que vigilar.
-    const degraded = images !== 'ok' || digitalAssets !== 'ok';
-
+    // `status` y `degraded` responden a preguntas distintas, y mezclarlas fue
+    // un error: `status` es "¿puede este servidor atender trafico?", que es
+    // lo que mira un balanceador para sacarlo de rotacion. La respuesta sigue
+    // siendo si aunque falte un almacen, porque pedidos, muro y panel
+    // funcionan igual. `degraded` es "¿hay algo roto que mirar?", que es lo
+    // que mira una persona.
+    //
+    // Por eso tampoco se devuelve 503: sacaria de servicio la API entera por
+    // algo que solo afecta a una parte.
     return {
-      status: degraded ? 'degraded' : 'ok',
+      status: 'ok',
+      degraded: images !== 'ok' || digitalAssets !== 'ok',
       service: 'kori-backend',
       timestamp: new Date().toISOString(),
       checks: {
