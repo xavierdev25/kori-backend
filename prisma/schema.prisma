@@ -122,8 +122,17 @@ model User {
   passwordHash String   @map("password_hash")
   role         UserRole @default(ARTIST)
   isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  /// Obliga a elegir contraseña nueva en el primer acceso.
+  ///
+  /// Se pone al crear la cuenta: la contraseña inicial la genera quien la crea
+  /// y viaja por algún sitio —un mensaje, un papel— antes de llegar a su
+  /// dueño. Mientras esto siga en `true`, esa contraseña de reparto es la que
+  /// abre el panel, así que la cuenta no está realmente en manos de nadie
+  /// hasta que se cambia.
+  mustChangePassword Boolean  @default(false) @map("must_change_password")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   refreshTokens RefreshToken[]
 

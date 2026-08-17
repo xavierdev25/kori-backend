@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Post,
   Req,
+  UnauthorizedException,
   Res,
   UseGuards,
   UseInterceptors,
@@ -22,6 +23,7 @@ import {
   REFRESH_TOKEN_COOKIE_PATH,
   buildCookieOptions,
 } from './auth.constants';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { AuthService, type IssuedSession } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
@@ -80,6 +82,29 @@ export class AuthController {
     response.clearCookie(
       REFRESH_TOKEN_COOKIE,
       buildCookieOptions(this.configService, 0, REFRESH_TOKEN_COOKIE_PATH),
+    );
+  }
+
+  /**
+   * Cambiar la propia contraseña. Solo la propia: no hay forma de tocar la de
+   * otro desde aquí, ni siquiera siendo ADMIN.
+   */
+  @Post('change-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 300_000 } })
+  async changePassword(
+    @CurrentUser() user: AuthenticatedUser | undefined,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    if (!user) {
+      throw new UnauthorizedException('Sesion no valida');
+    }
+
+    await this.authService.changePassword(
+      user.id,
+      dto.currentPassword,
+      dto.newPassword,
     );
   }
 

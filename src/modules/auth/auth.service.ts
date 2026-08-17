@@ -1,10 +1,22 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import type { User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+
+/**
+ * Coste del hash. Doce es el mínimo que se acordó para este proyecto: por
+ * debajo, una filtración de la tabla se prueba a fuerza bruta en tiempo
+ * razonable con una GPU de andar por casa.
+ */
+const BCRYPT_ROUNDS = 12;
 
 import { PrismaService } from '../prisma/prisma.service';
 import { REFRESH_TOKEN_TTL_DAYS } from './auth.constants';
@@ -14,6 +26,8 @@ export interface AuthenticatedUser {
   id: string;
   email: string;
   role: UserRole;
+  /** Si sigue en `true`, el panel pide una contraseña nueva antes de nada. */
+  mustChangePassword: boolean;
 }
 
 export interface IssuedSession {
@@ -138,7 +152,64 @@ export class AuthService {
       return null;
     }
 
-    return { id: user.id, email: user.email, role: user.role };
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword,
+    };
+  }
+
+  /**
+   * Cambia la contraseña de quien la pide.
+   *
+   * Se exige la actual aunque ya haya sesión abierta: sin eso, un portátil
+   * desbloqueado un minuto basta para quedarse con la cuenta de otro.
+   *
+   * Al terminar se revocan TODAS las demás sesiones. Si alguien cambia la
+   * contraseña es porque cree que la anterior ya no es de fiar, y dejar vivas
+   * las sesiones abiertas con ella vacía el gesto.
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.prismaService.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Sesion no valida');
+    }
+
+    const matches = await bcrypt.compare(currentPassword, user.passwordHash);
+
+    if (!matches) {
+      throw new UnauthorizedException('La contraseña actual no es correcta');
+    }
+
+    // Repetir la que ya tenía deja la cuenta igual de expuesta que antes: la
+    // contraseña de reparto seguiría siendo válida.
+    if (await bcrypt.compare(newPassword, user.passwordHash)) {
+      throw new BadRequestException(
+        'La contraseña nueva tiene que ser distinta de la actual',
+      );
+    }
+
+    await this.prismaService.$transaction([
+      this.prismaService.user.update({
+        where: { id: userId },
+        data: {
+          passwordHash: await bcrypt.hash(newPassword, BCRYPT_ROUNDS),
+          mustChangePassword: false,
+        },
+      }),
+      this.prismaService.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
   }
 
   /**
@@ -188,7 +259,12 @@ export class AuthService {
       accessTokenTtlMs: this.parseDurationToMs(expiresIn),
       refreshTokenTtlMs,
       expiresIn,
-      user: { id: user.id, email: user.email, role: user.role },
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        mustChangePassword: user.mustChangePassword,
+      },
     };
   }
 
