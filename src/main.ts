@@ -49,8 +49,8 @@ async function bootstrap() {
   app.use(compression());
 
   /**
-   * Render manda SIGTERM al desplegar y al dormir el contenedor. Sin esto,
-   * Nest no cierra la conexión de Prisma ni deja terminar lo que esté en
+   * Docker manda SIGTERM al recrear el contenedor en cada despliegue. Sin
+   * esto, Nest no cierra la conexión de Prisma ni deja terminar lo que esté en
    * curso: se corta un webhook a medias o un job del outbox sin marcar.
    */
   app.enableShutdownHooks();
@@ -158,5 +158,47 @@ async function bootstrap() {
   const port = Number(configService.get<string>('PORT') ?? 4000);
   await app.listen(port);
 }
+
+/**
+ * La última red, para que un fallo suelto no tire la tienda entera.
+ *
+ * Desde Node 15 una promesa rechazada sin capturar termina el proceso. En un
+ * contenedor eso son reinicios en bucle: la API deja de responder para todo el
+ * mundo por un fallo en un rincón que quizá no afectaba a nadie más. Ya pasó
+ * —seis horas caída— y aunque aquella causa era otra, el resultado visible
+ * desde fuera es idéntico y no había nada que lo contara.
+ *
+ * Se registra y se sigue sirviendo. No es tragarse el error: va al log con su
+ * traza y a Sentry si está configurado, así que queda a la vista. Simplemente
+ * se decide que para una tienda es mejor seguir en pie con un fallo conocido
+ * que caerse del todo.
+ *
+ * `uncaughtException` sí termina: ahí el proceso queda en un estado que no se
+ * puede dar por bueno, y seguir sirviendo con la casa a medio arder es peor
+ * que dejar que Docker levante uno limpio. Se sale con calma para que el
+ * apagado ordenado corra.
+ */
+function instalarRedDeSeguridad(): void {
+  const logger = new Logger('Proceso');
+
+  process.on('unhandledRejection', (reason) => {
+    logger.error(
+      `Promesa rechazada sin capturar: ${
+        reason instanceof Error ? reason.stack : String(reason)
+      }`,
+    );
+    Sentry.captureException(reason);
+  });
+
+  process.on('uncaughtException', (error) => {
+    logger.error(`Excepción sin capturar: ${error.stack ?? error.message}`);
+    Sentry.captureException(error);
+
+    // Se le da un margen a Sentry para que llegue a enviarlo antes de morir.
+    void Sentry.close(2000).then(() => process.exit(1));
+  });
+}
+
+instalarRedDeSeguridad();
 
 void bootstrap();
