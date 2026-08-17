@@ -1,7 +1,17 @@
 /**
  * Da de alta una cuenta del panel.
  *
- *   pnpm exec tsx scripts/create-user.ts guillermo@ejemplo.com ADMIN
+ * En el servidor se ejecuta el COMPILADO, no este fichero:
+ *
+ *   docker compose exec api node dist/scripts/create-user.js correo@x.com ADMIN
+ *
+ * La imagen de producción solo trae `dependencies`, así que no tiene `tsx` ni
+ * ningún otro intérprete de TypeScript — y no debe tenerlo. Lo que sí lleva es
+ * `dist`, donde este script acaba compilado junto al resto.
+ *
+ * En local, con las dependencias de desarrollo puestas:
+ *
+ *   pnpm exec tsx scripts/create-user.ts correo@x.com ADMIN
  *
  * La contraseña NO se pide por parámetro y no se elige a mano: la genera este
  * script y la imprime una sola vez, aquí, en la terminal de quien lo ejecuta.
@@ -55,8 +65,10 @@ async function main(): Promise<void> {
   const [email, rolBruto] = process.argv.slice(2);
 
   if (!email || !email.includes('@')) {
+    // El mensaje enseña la forma compilada: es la que se usa en el servidor,
+    // que es donde se lee este error.
     console.error(
-      'Uso: pnpm exec tsx scripts/create-user.ts <correo> [ADMIN|ARTIST]',
+      'Uso: node dist/scripts/create-user.js <correo> [ADMIN|ARTIST]',
     );
     process.exit(1);
   }
