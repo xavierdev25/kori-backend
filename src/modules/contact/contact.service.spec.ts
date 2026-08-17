@@ -5,6 +5,24 @@ import { ContactService } from './contact.service';
 import type { CreateContactMessageDto } from './dto/create-contact-message.dto';
 
 function montar() {
+  // Tipado, no `jest.fn()` a secas: leer `mock.calls[0][0]` sobre `any` lo
+  // rechaza el lint, y con razon — una asercion sobre `any` pasa aunque el
+  // dato no sea el que se cree.
+  const findMany = jest
+    .fn<
+      Promise<unknown[]>,
+      [
+        {
+          orderBy: { createdAt: string };
+          select: Record<string, boolean>;
+          skip: number;
+          take: number;
+        },
+      ]
+    >()
+    .mockResolvedValue([]);
+  const count = jest.fn().mockResolvedValue(0);
+  const del = jest.fn().mockResolvedValue({});
   // Tipado en vez de `jest.fn()` a secas: sin el tipo, leer `mock.calls[0][0]`
   // es acceso sobre `any` y el lint lo rechaza — con razón, porque una
   // aserción sobre `any` pasa aunque el dato no sea el que se cree.
@@ -18,10 +36,13 @@ function montar() {
       get: () => 'pepper-de-pruebas-con-mas-de-32-caracteres',
     } as unknown as ConfigService,
     { enqueueStandalone } as never,
-    { contactMessage: { create } } as never,
+    {
+      contactMessage: { create, findMany, count, delete: del },
+      $transaction: (ops: unknown[]) => Promise.all(ops),
+    } as never,
   );
 
-  return { create, enqueueStandalone, service };
+  return { count, create, del, enqueueStandalone, findMany, service };
 }
 
 const mensaje: CreateContactMessageDto = {
@@ -91,6 +112,42 @@ describe('ContactService', () => {
     const guardado = create.mock.calls[0][0];
 
     expect(guardado.data['locale']).toBe('es');
+  });
+
+  it('la bandeja no expone el hash de la IP', async () => {
+    // Sirve para frenar abusos desde el servidor; en el panel no ayuda a
+    // contestar a nadie, así que no sale. Lo que no hace falta, no viaja.
+    const { findMany, service } = montar();
+
+    await service.findAll(1, 20);
+
+    const consulta = findMany.mock.calls[0][0];
+
+    expect(consulta.select['ipHash']).toBeUndefined();
+    expect(consulta.select['message']).toBe(true);
+  });
+
+  it('la bandeja llega del mas nuevo al mas viejo', async () => {
+    const { findMany, service } = montar();
+
+    await service.findAll(1, 20);
+
+    const consulta = findMany.mock.calls[0][0];
+
+    expect(consulta.orderBy.createdAt).toBe('desc');
+  });
+
+  it('la paginacion no acepta valores absurdos', async () => {
+    // `limit` viene de la URL: sin tope, un `?limit=999999` se trae la tabla
+    // entera y tumba la respuesta.
+    const { findMany, service } = montar();
+
+    await service.findAll(-5, 999_999);
+
+    const consulta = findMany.mock.calls[0][0];
+
+    expect(consulta.take).toBe(100);
+    expect(consulta.skip).toBe(0);
   });
 
   it('la clave de deduplicación usa el id del mensaje', async () => {

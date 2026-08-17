@@ -63,4 +63,56 @@ export class ContactService {
 
     return { received: true };
   }
+
+  /**
+   * Los mensajes recibidos, del más nuevo al más viejo.
+   *
+   * `ipHash` no sale: sirve para frenar abusos desde el servidor, y enseñarlo
+   * en el panel no ayuda a contestar a nadie. Lo que no hace falta que salga,
+   * no sale.
+   */
+  async findAll(page: number, limit: number) {
+    const safePage = Math.max(Math.trunc(page), 1);
+    const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+
+    const [total, data] = await this.prismaService.$transaction([
+      this.prismaService.contactMessage.count(),
+      this.prismaService.contactMessage.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip: (safePage - 1) * safeLimit,
+        take: safeLimit,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          message: true,
+          locale: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit),
+      },
+    };
+  }
+
+  /**
+   * Borra un mensaje ya atendido.
+   *
+   * Sin papelera: es una bandeja de entrada, no un registro que haya que
+   * conservar. Quien borra ya leyó y contestó — y el correo original sigue en
+   * la bandeja de quien lo recibió.
+   */
+  async remove(id: string) {
+    await this.prismaService.contactMessage.delete({ where: { id } });
+
+    return { deleted: true, id };
+  }
 }
