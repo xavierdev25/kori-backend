@@ -63,6 +63,58 @@ export class OrderEmailsService {
   }
 
   /**
+   * Reenvía a soporte lo que alguien escribió en el formulario de GKY.
+   *
+   * `replyTo` es lo que hace que sirva de algo: sin él, darle a "responder"
+   * contesta a la dirección desde la que envía la tienda, no a la persona, y
+   * el mensaje se queda sin contestar mientras parece atendido.
+   *
+   * El texto va escapado antes de entrar en el HTML: es contenido que escribe
+   * cualquiera desde internet, y aquí lo lee alguien con la sesión del panel
+   * abierta en la misma pantalla.
+   */
+  async sendContactMessage(mensaje: {
+    email: string;
+    locale: string;
+    message: string;
+    name: string;
+  }): Promise<void> {
+    const to = this.emailService.alertRecipient;
+
+    if (!to) {
+      throw new Error('ADMIN_ALERT_EMAIL no está configurado');
+    }
+
+    const cuerpo = [
+      `De: ${mensaje.name} <${mensaje.email}>`,
+      `Idioma: ${mensaje.locale}`,
+      '',
+      mensaje.message,
+    ].join('\n');
+
+    await this.emailService.send({
+      to,
+      replyTo: mensaje.email,
+      subject: `[Kori] Mensaje de ${mensaje.name}`,
+      text: cuerpo,
+      html: renderizarCorreo(
+        {
+          avance: `${mensaje.name} escribió desde el formulario`,
+          titulo: `Mensaje de ${escaparHtml(mensaje.name)}`,
+          parrafos: [
+            `${escaparHtml(mensaje.name)} &lt;${escaparHtml(mensaje.email)}&gt; · ${escaparHtml(mensaje.locale)}`,
+          ],
+          // En el bloque destacado y respetando los saltos de línea: es lo
+          // único que hay que leer, y viene tal cual lo escribieron.
+          bloque: `<span style="white-space:pre-wrap">${escaparHtml(mensaje.message)}</span>`,
+          nota: 'Responde a este correo y le llega directo a quien escribió.',
+        },
+        escaparHtml('kor!'),
+      ),
+    });
+  }
+
+  /**
    * Los enlaces de descarga de un pedido digital ya pagado.
    *
    * Se dice cuánto duran y cuántas veces sirven. Quien compra a las 3 de la

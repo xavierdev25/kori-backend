@@ -54,6 +54,31 @@ enum NoteStatus {
 }
 
 /// Correos capturados por el "Coming soon" de la landing.
+/// Un mensaje del formulario de contacto de GKY.
+///
+/// Se guarda ANTES de intentar mandar el correo, y esa es la razón de que la
+/// tabla exista: si Resend está caído o el envío agota sus reintentos, el
+/// mensaje sigue aquí. Alguien que escribe a soporte porque su compra falló no
+/// puede depender de que un tercero esté disponible en ese momento.
+model ContactMessage {
+  id      String @id @default(uuid())
+  name    String
+  email   String
+  message String
+
+  /// El idioma en el que escribió, para contestarle en el suyo.
+  locale String @default("es")
+
+  /// Hasheada con HASH_PEPPER, igual que en las notitas y la auditoría:
+  /// sirve para frenar abusos sin guardar un dato personal en claro.
+  ipHash String? @map("ip_hash")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("contact_messages")
+}
+
 model Subscriber {
   id        String   @id @default(uuid())
   email     String   @unique
@@ -540,6 +565,10 @@ enum OutboxJobType {
   SEND_ORDER_CONFIRMATION
   SEND_SHIPPING_NOTIFICATION
   SEND_ADMIN_ALERT
+  /// Reenvía a soporte un mensaje del formulario de contacto. El mensaje ya
+  /// está guardado en `contact_messages` antes de encolarse: si el correo
+  /// falla para siempre, no se pierde: sigue en la base.
+  SEND_CONTACT_MESSAGE
 }
 
 enum OutboxJobStatus {

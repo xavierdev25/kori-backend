@@ -17,6 +17,14 @@ export interface EmailMessage {
   text: string;
   /** Opcional: las alertas internas no necesitan maquetación. */
   html?: string;
+  /**
+   * A dónde va la respuesta al pulsar "responder".
+   *
+   * Lo necesita el formulario de contacto: sin esto, contestar le escribe a la
+   * dirección desde la que envía la tienda —que nadie lee— en vez de a la
+   * persona, y el mensaje se queda sin respuesta pareciendo atendido.
+   */
+  replyTo?: string;
 }
 
 /** Un envio que tarda mas que esto se da por perdido y el job reintenta. */
@@ -115,6 +123,7 @@ export class EmailService implements OnModuleInit {
           subject: message.subject,
           text: message.text,
           ...(message.html ? { html: message.html } : {}),
+          ...(message.replyTo ? { replyTo: message.replyTo } : {}),
           to: message.to,
         }),
       ),

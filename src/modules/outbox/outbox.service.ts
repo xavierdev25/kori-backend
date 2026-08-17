@@ -60,7 +60,12 @@ export class OutboxService {
       };
 
       for (const job of jobs) {
-        const outcome = await this.process(job.id, job.type, job.orderId);
+        const outcome = await this.process(
+          job.id,
+          job.type,
+          job.orderId,
+          job.payload,
+        );
         summary[outcome] += 1;
       }
 
@@ -81,7 +86,7 @@ export class OutboxService {
       where: { status: 'PENDING', nextAttemptAt: { lte: new Date() } },
       orderBy: { nextAttemptAt: 'asc' },
       take: BATCH_SIZE,
-      select: { id: true, type: true, orderId: true },
+      select: { id: true, type: true, orderId: true, payload: true },
     });
 
     if (candidates.length === 0) {
@@ -101,9 +106,10 @@ export class OutboxService {
     jobId: string,
     type: OutboxJobType,
     orderId: string | null,
+    payload: Prisma.JsonValue,
   ): Promise<'done' | 'failed' | 'retrying'> {
     try {
-      await this.execute(type, orderId);
+      await this.execute(type, orderId, payload);
 
       await this.prismaService.outboxJob.update({
         where: { id: jobId },
@@ -124,7 +130,16 @@ export class OutboxService {
   private async execute(
     type: OutboxJobType,
     orderId: string | null,
+    payload: Prisma.JsonValue,
   ): Promise<void> {
+    // Antes del cierre por pedido: este trabajo no cuelga de ninguno, y la
+    // comprobación de abajo lo daría por roto para siempre. Al salir aquí,
+    // TypeScript lo descarta del switch de abajo — por eso no aparece allí.
+    if (type === 'SEND_CONTACT_MESSAGE') {
+      await this.sendContactMessage(payload);
+      return;
+    }
+
     if (!orderId) {
       throw new Error(`El trabajo ${type} llegó sin pedido asociado`);
     }
@@ -212,6 +227,37 @@ export class OutboxService {
         );
         break;
     }
+  }
+
+  /**
+   * Reenvía a soporte un mensaje del formulario.
+   *
+   * Se relee de la base en vez de llevar el texto en el payload: si alguien
+   * borra el mensaje, este trabajo deja de tener sentido y termina en vez de
+   * reenviar algo que ya no existe.
+   */
+  private async sendContactMessage(payload: Prisma.JsonValue): Promise<void> {
+    const id =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? (payload as { contactMessageId?: unknown }).contactMessageId
+        : undefined;
+
+    if (typeof id !== 'string') {
+      throw new Error('El trabajo de contacto llegó sin contactMessageId');
+    }
+
+    const mensaje = await this.prismaService.contactMessage.findUnique({
+      where: { id },
+    });
+
+    if (!mensaje) {
+      // Borrado entre medias: no es un fallo que haya que reintentar cinco
+      // veces. Se da por hecho y se sigue.
+      this.logger.warn(`El mensaje de contacto ${id} ya no existe; se omite`);
+      return;
+    }
+
+    await this.orderEmailsService.sendContactMessage(mensaje);
   }
 
   /**
@@ -342,6 +388,25 @@ export class OutboxService {
   ): Promise<void> {
     await this.prismaService.outboxJob.createMany({
       data: [{ type, dedupeKey: `${type}:${orderId}`, payload, orderId }],
+      skipDuplicates: true,
+    });
+  }
+
+  /**
+   * Encola algo que no cuelga de un pedido, como un mensaje de contacto.
+   *
+   * `orderId` queda a null: la relación es opcional en el modelo y forzar un
+   * pedido inventado para poder encolar sería mentirle a la base de datos. La
+   * clave de deduplicación la pone quien llama con el id de su propio
+   * registro, que es lo que da la idempotencia.
+   */
+  async enqueueStandalone(
+    type: OutboxJobType,
+    dedupeId: string,
+    payload: Prisma.InputJsonValue = {},
+  ): Promise<void> {
+    await this.prismaService.outboxJob.createMany({
+      data: [{ type, dedupeKey: `${type}:${dedupeId}`, payload }],
       skipDuplicates: true,
     });
   }

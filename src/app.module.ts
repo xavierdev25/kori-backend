@@ -18,6 +18,7 @@ import { LatencyController } from './common/observability/latency.controller';
 import { LatencyRegistry } from './common/observability/latency.registry';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { ContactModule } from './modules/contact/contact.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
 import { HealthModule } from './modules/health/health.module';
@@ -55,6 +56,7 @@ import { SubscribersModule } from './modules/subscribers/subscribers.module';
     AuthModule,
     AdminModule,
     CatalogModule,
+    ContactModule,
     PaymentsModule,
     CheckoutModule,
     OrdersModule,
