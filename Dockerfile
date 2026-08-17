@@ -42,6 +42,10 @@ COPY nest-cli.json tsconfig.json tsconfig.build.json ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 COPY src ./src
+# Sin esto, `dist/scripts/` no existe en la imagen y el alta de cuentas —que
+# se ejecuta AQUI, en el servidor— falla con MODULE_NOT_FOUND. Se descubrio
+# intentando crear la cuenta de Guillermo en produccion.
+COPY scripts ./scripts
 
 RUN pnpm exec prisma generate
 RUN pnpm run build

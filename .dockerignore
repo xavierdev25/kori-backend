@@ -27,6 +27,9 @@ lerna-debug.log*
 test
 **/*.spec.ts
 test-drawing.png
+# La prueba de carga se ejecuta desde fuera y necesita autocannon, que es
+# dependencia de desarrollo. En la imagen solo estorbaria.
+scripts/load-test.ts
 
 # Editor and local agent metadata
 .vscode

@@ -21,9 +21,37 @@
 import { readFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { builtinModules } from "node:module";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const raiz = new URL("..", import.meta.url).pathname;
+
+/**
+ * Los scripts que NO viajan a la imagen, segun `.dockerignore`.
+ *
+ * Se lee de ahi en vez de mantener otra lista: `.dockerignore` es lo que de
+ * verdad decide que entra en la imagen, y dos listas que digan lo mismo acaban
+ * diciendo cosas distintas. La prueba de carga, por ejemplo, usa `autocannon`
+ * —dependencia de desarrollo— y se ejecuta desde fuera del contenedor.
+ */
+function scriptsQueNoViajan() {
+  let ignorados = "";
+
+  try {
+    ignorados = readFileSync(join(raiz, ".dockerignore"), "utf8");
+  } catch {
+    return new Set();
+  }
+
+  const nombres = ignorados
+    .split("\n")
+    .map((linea) => linea.trim())
+    .filter((linea) => linea.startsWith("scripts/") && linea.endsWith(".ts"))
+    .map((linea) => linea.slice("scripts/".length).replace(/\.ts$/, ".js"));
+
+  return new Set(nombres);
+}
+
+const fueraDeLaImagen = scriptsQueNoViajan();
 const paquete = JSON.parse(readFileSync(join(raiz, "package.json"), "utf8"));
 const permitidos = new Set([
   ...Object.keys(paquete.dependencies ?? {}),
@@ -57,10 +85,28 @@ async function ficherosJs(directorio) {
 
 const problemas = [];
 
-// Solo `dist/src`: es lo que ejecuta el contenedor. `dist/prisma.config.js` y
-// `dist/scripts/` tambien se compilan, pero el entrypoint nunca los carga —
-// las migraciones corren en otra etapa de la imagen, con sus dependencias.
-for (const fichero of await ficherosJs(join(raiz, "dist", "src"))) {
+// `dist/src` es lo que arranca el contenedor, y `dist/scripts` lo que se
+// ejecuta a mano dentro de el —el alta de cuentas, por ejemplo—. Los dos
+// corren con las dependencias de produccion, asi que los dos se comprueban.
+//
+// `dist/prisma.config.js` queda fuera a proposito: las migraciones corren en
+// otra etapa de la imagen, que si tiene las dependencias de desarrollo.
+const directorios = [join(raiz, "dist", "src"), join(raiz, "dist", "scripts")];
+const aRevisar = [];
+
+for (const directorio of directorios) {
+  try {
+    aRevisar.push(
+      ...(await ficherosJs(directorio)).filter(
+        (f) => !fueraDeLaImagen.has(basename(f)),
+      ),
+    );
+  } catch {
+    // `dist/scripts` no existe si no hay scripts que compilar: no es un fallo.
+  }
+}
+
+for (const fichero of aRevisar) {
   const contenido = readFileSync(fichero, "utf8");
 
   for (const [, especificador] of contenido.matchAll(
