@@ -73,9 +73,27 @@ describe('CatalogService', () => {
       prisma.orderItem.count.mockResolvedValue(3);
 
       await expect(service.deleteProduct('p1')).rejects.toThrow(
-        /3 venta\(s\).*isActive/s,
+        /3 venta\(s\).*[Dd]espubl[ií]ca/s,
       );
     });
+
+    it.each([
+      ['producto', () => service.deleteProduct('p1')],
+      ['variante', () => service.deleteVariant('p1', 'v1')],
+    ])(
+      'el aviso del %s no le enseña sintaxis de API a nadie',
+      async (_caso, accion) => {
+        // Este texto sale tal cual en un aviso del panel, que usa Guillermo.
+        // Decia `Desactivalo con PATCH { "isActive": false }`: instrucciones
+        // para un cliente HTTP delante de alguien que solo queria borrar algo.
+        prisma.orderItem.count.mockResolvedValue(1);
+
+        const error: unknown = await accion().catch((e: unknown) => e);
+        const mensaje = error instanceof Error ? error.message : String(error);
+
+        expect(mensaje).not.toMatch(/PATCH|POST|DELETE|isActive|[{}]/);
+      },
+    );
 
     it('sin ventas si se borra', async () => {
       await expect(service.deleteProduct('p1')).resolves.toEqual({

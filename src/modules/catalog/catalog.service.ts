@@ -191,7 +191,7 @@ export class CatalogService {
 
     if (soldUnits > 0) {
       throw new ConflictException(
-        `Este producto tiene ${soldUnits} venta(s) registradas y no se puede borrar. Desactívalo con PATCH { "isActive": false }.`,
+        `Este producto tiene ${soldUnits} venta(s) y no se puede borrar: quien lo compró conserva el acceso a lo que pagó. Despublícalo para que deje de aparecer en la tienda; las ventas no se tocan.`,
       );
     }
 
@@ -312,7 +312,7 @@ export class CatalogService {
 
     if (soldUnits > 0) {
       throw new ConflictException(
-        `Esta variante tiene ${soldUnits} venta(s) registradas y no se puede borrar. Desactívala con PATCH { "isActive": false }.`,
+        `Esta variante tiene ${soldUnits} venta(s) y no se puede borrar: quien la compró conserva el acceso a lo que pagó. Despublícala para que deje de estar a la venta; las ventas no se tocan.`,
       );
     }
 
