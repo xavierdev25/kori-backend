@@ -6,7 +6,9 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs'],
+    // Las configuraciones de Jest van en CommonJS y fuera del tsconfig, asi
+    // que el servicio de tipos de typescript-eslint no las reconoce.
+    ignores: ['eslint.config.mjs', 'jest.config.cjs', 'jest.esm-cjs.cjs', 'test/*.cjs'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

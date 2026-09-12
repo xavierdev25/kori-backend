@@ -7,10 +7,13 @@ overrides:
   # llega al contenedor de produccion, asi que se fuerza la parcheada.
   multer: ">=2.3.0"
 
-  # sanitize-html se queda en 2.17.4: la 2.17.6 arrastra htmlparser2@12, que
-  # es solo ESM y rompe Jest (CommonJS). Sus dos avisos venian de estas dos
-  # dependencias transitivas, asi que se parchean directamente en vez de
-  # subir la libreria entera.
+  # NOTA sobre sanitize-html: aqui ponia que se quedaba en 2.17.4 porque la
+  # 2.17.6 arrastra htmlparser2@12 (solo ESM) y rompia Jest, y que sus avisos
+  # se parcheaban en las dependencias transitivas. Eso dejo de valer: los dos
+  # avisos siguientes son fallos del propio sanitize-html, asi que no habia
+  # nada debajo que parchear. Se subio a 2.17.7 y el problema de Jest se
+  # resuelve en `jest.esm-cjs.cjs`, que explica el como y el porque.
+
   # `qs` llega por express y tiene dos avisos de denegacion de servicio. Es
   # quien parsea la query string de CADA peticion, asi que se fuerza.
   qs: ">=6.16.0"
