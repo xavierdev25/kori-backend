@@ -39,6 +39,14 @@ import { SubscribersModule } from './modules/subscribers/subscribers.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+      // En pruebas NO se lee el `.env` del desarrollador.
+      //
+      // Dos motivos, y el segundo es el que duele: las pruebas dejaban de ser
+      // reproducibles —pasaban o fallaban segun lo que cada uno tuviera en su
+      // fichero, y en CI siempre pasaban porque alli no hay ninguno—, y
+      // ademas cargaban credenciales reales en memoria para no usarlas. Una
+      // clave de produccion no tiene por que entrar en un proceso de test.
+      ignoreEnvFile: process.env['NODE_ENV'] === 'test',
       validate: validateEnvironment,
     }),
     ThrottlerModule.forRoot([

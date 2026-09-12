@@ -22,3 +22,32 @@ process.env['DATABASE_URL'] =
 process.env['DIRECT_URL'] =
   'postgresql://user:pass@localhost:5432/kori?schema=public';
 process.env['PORT'] = '4000';
+
+// Stripe con valores de prueba, y no por capricho: `@prisma/client` carga el
+// `.env` del desarrollador al importarse, asi que sin esto los tests heredaban
+// las claves REALES de quien los ejecutara. `dotenv` no pisa lo que ya esta en
+// `process.env`, de modo que fijarlas aqui es lo que impide que entre una
+// `sk_live` en un proceso de test.
+process.env['STRIPE_SECRET_KEY'] = 'sk_test_para_pruebas';
+process.env['STRIPE_WEBHOOK_SECRET'] = 'whsec_para_pruebas';
+process.env['STRIPE_SUCCESS_URL'] = 'http://localhost:4321/compras';
+process.env['STRIPE_CANCEL_URL'] = 'http://localhost:4321/shop';
+
+/**
+ * Red de seguridad: si aun asi se colara una credencial de produccion, que se
+ * vea.
+ *
+ * Un test que corre con claves reales puede cobrar de verdad o escribir en la
+ * base equivocada, y lo hace en silencio. Mejor romper la suite que descubrirlo
+ * por un cargo en la cuenta de alguien.
+ */
+for (const clave of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']) {
+  const valor = process.env[clave] ?? '';
+
+  if (valor.includes('live')) {
+    throw new Error(
+      `${clave} tiene una credencial de produccion dentro de los tests. ` +
+        'Revisa que el entorno de pruebas no este heredando el .env real.',
+    );
+  }
+}
