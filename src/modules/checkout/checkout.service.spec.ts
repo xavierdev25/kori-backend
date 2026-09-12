@@ -219,6 +219,25 @@ describe('CheckoutService', () => {
       expect(params.metadata.orderId).toBe('order-1');
     });
 
+    it('la sesion caduca a los 30 minutos, no a las 24 horas', async () => {
+      // Sin `expires_at` rige el defecto de Stripe y el pedido sin pagar vive
+      // un dia entero bloqueando el borrado del producto.
+      const antes = Math.floor(Date.now() / 1000);
+
+      await service.createSession({
+        items: [{ variantId: 'v1', quantity: 1 }],
+      });
+
+      const params = callArg<{ expires_at: number }>(sessionsCreate);
+      const margen = params.expires_at - antes;
+
+      expect(margen).toBeGreaterThanOrEqual(30 * 60);
+      // Con holgura para el tiempo que tarda el propio test, pero muy lejos
+      // de las 24 h: si alguien sube la constante, esto lo dice.
+      expect(margen).toBeLessThan(31 * 60);
+      expect(Number.isInteger(params.expires_at)).toBe(true);
+    });
+
     it('usa clave de idempotencia por pedido', async () => {
       await service.createSession({
         items: [{ variantId: 'v1', quantity: 1 }],

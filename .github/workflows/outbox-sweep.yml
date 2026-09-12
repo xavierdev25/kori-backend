@@ -1,6 +1,11 @@
 name: Outbox sweep
 
-# Vacia la cola de trabajos pendientes (correos, envio a produccion).
+# Mantenimiento periodico del backend. Hace dos cosas:
+#
+#   1. Vacia la cola de trabajos pendientes (correos, envio a produccion) y
+#      purga los que ya se completaron hace mucho.
+#   2. Concilia con Stripe los pedidos que llevan rato sin pagar, y purga los
+#      intentos de compra que nunca llegaron a cobrarse.
 #
 # Por que hace falta un cron externo: nacio porque Render dormia el contenedor
 # a los 15 min y con el moria el temporizador interno. En EC2 el proceso ya no
@@ -8,10 +13,13 @@ name: Outbox sweep
 # reinicia o se queda colgado, un pedido pagado se quedaria encolado y el
 # comprador no recibiria ni su confirmacion. Barrer de mas no cuesta nada.
 #
+# La conciliacion va aqui y no en su propio cron a proposito: mismo secreto,
+# misma cadencia y un solo sitio donde mirar cuando algo falla.
+#
 # OJO con las limitaciones de GitHub Actions (las mismas que el keep-alive):
 # el cron se retrasa con frecuencia y GitHub desactiva los workflows
 # programados tras 60 dias sin commits en el repo. Para una tienda con ventas
-# de verdad, conviene un monitor externo apuntando al mismo endpoint.
+# de verdad, conviene un monitor externo apuntando a los mismos endpoints.
 
 on:
   schedule:
@@ -26,12 +34,12 @@ concurrency:
 
 jobs:
   sweep:
-    name: Procesar cola pendiente
+    name: Cola pendiente y conciliacion
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
-      - name: Ejecutar barrido
+      - name: Ejecutar mantenimiento
         env:
           BACKEND_URL: ${{ vars.BACKEND_URL || 'https://api.insecurekori.com' }}
           INTERNAL_TASK_SECRET: ${{ secrets.INTERNAL_TASK_SECRET }}
@@ -40,65 +48,96 @@ jobs:
 
           # Igual que en alerts: sin secreto todavia no esta configurado.
           if [ -z "${INTERNAL_TASK_SECRET:-}" ]; then
-            echo "::warning::INTERNAL_TASK_SECRET no configurado: barrido inactivo."
+            echo "::warning::INTERNAL_TASK_SECRET no configurado: mantenimiento inactivo."
             echo "Anadelo en Settings > Secrets con el mismo valor que hay en"
             echo "/home/ec2-user/.env dentro de la instancia EC2."
             exit 0
           fi
 
-          url="${BACKEND_URL%/}/internal/outbox/run"
+          # Los dos endpoints comparten secreto, reintentos y diagnostico, asi
+          # que la llamada se escribe una vez. Duplicarla era garantizar que un
+          # dia solo se arreglara una de las dos copias.
+          #
+          # Deja la respuesta en RESPUESTA para que quien llama pueda mirarla:
+          # cada endpoint tiene sus propias senales de que algo va mal.
+          RESPUESTA=""
 
-          # EC2 no se duerme, pero un despliegue en curso deja la API sin
-          # responder unos segundos: por eso se reintenta.
-          for attempt in 1 2 3; do
-            echo "::group::Intento $attempt"
-            body=$(curl -sS --max-time 120 -w '\n%{http_code}' -X POST "$url" \
-              -H "x-internal-secret: ${INTERNAL_TASK_SECRET}" 2>&1) && rc=0 || rc=$?
-            status=$(printf '%s' "$body" | tail -n1)
-            payload=$(printf '%s' "$body" | sed '$d')
-            echo "curl rc=$rc http=$status"
-            echo "$payload"
-            echo "::endgroup::"
+          llamar() {
+            url="$1"
+            etiqueta="$2"
+            RESPUESTA=""
 
-            # Cada codigo dice algo distinto y hay que decirlo, no listar
-            # posibilidades para que el humano adivine cual es.
-            case "$status" in
-              404)
-                echo "::warning::El backend desplegado aun no tiene /internal/outbox/run."
-                echo "Despliega el codigo actual y esto empezara a funcionar."
-                exit 0
-                ;;
-              503)
-                echo "::error::El backend no tiene INTERNAL_TASK_SECRET configurado."
-                echo "Anadelo a /home/ec2-user/.env en la instancia y levanta con"
-                echo "  docker compose up -d    (restart NO recarga env_file)"
-                echo "Tenerlo solo en los secrets de GitHub no basta: hacen falta los dos."
-                exit 1
-                ;;
-              403)
-                echo "::error::El secreto de GitHub no coincide con el del contenedor."
-                echo "Genera uno nuevo y ponlo IGUAL en ambos sitios:"
-                echo "  openssl rand -base64 36"
-                exit 1
-                ;;
-            esac
+            # EC2 no se duerme, pero un despliegue en curso deja la API sin
+            # responder unos segundos: por eso se reintenta.
+            for attempt in 1 2 3; do
+              echo "::group::$etiqueta - intento $attempt"
+              body=$(curl -sS --max-time 120 -w '\n%{http_code}' -X POST "$url" \
+                -H "x-internal-secret: ${INTERNAL_TASK_SECRET}" 2>&1) && rc=0 || rc=$?
+              status=$(printf '%s' "$body" | tail -n1)
+              payload=$(printf '%s' "$body" | sed '$d')
+              echo "curl rc=$rc http=$status"
+              echo "$payload"
+              echo "::endgroup::"
 
-            if [ "$rc" -eq 0 ] && [ "$status" = "200" ]; then
-              # Un trabajo agotado ya genera su propio correo de alerta, pero
-              # tambien se marca aqui para que se vea en la pestana de Actions.
-              if printf '%s' "$payload" | grep -qv '"failed":0'; then
-                echo "::warning::Hay trabajos agotados. Revisa los pedidos en NEEDS_REVIEW."
+              # Cada codigo dice algo distinto y hay que decirlo, no listar
+              # posibilidades para que el humano adivine cual es.
+              case "$status" in
+                404)
+                  echo "::warning::$etiqueta: el backend desplegado aun no tiene $url."
+                  echo "Despliega el codigo actual y esto empezara a funcionar."
+                  return 0
+                  ;;
+                503)
+                  echo "::error::El backend no tiene INTERNAL_TASK_SECRET configurado."
+                  echo "Anadelo a /home/ec2-user/.env en la instancia y levanta con"
+                  echo "  docker compose up -d    (restart NO recarga env_file)"
+                  echo "Tenerlo solo en los secrets de GitHub no basta: hacen falta los dos."
+                  return 1
+                  ;;
+                403)
+                  echo "::error::El secreto de GitHub no coincide con el del contenedor."
+                  echo "Genera uno nuevo y ponlo IGUAL en ambos sitios:"
+                  echo "  openssl rand -base64 36"
+                  return 1
+                  ;;
+              esac
+
+              if [ "$rc" -eq 0 ] && [ "$status" = "200" ]; then
+                RESPUESTA="$payload"
+                return 0
               fi
-              exit 0
-            fi
 
-            [ "$attempt" -lt 3 ] && sleep $((attempt * 20))
-          done
+              [ "$attempt" -lt 3 ] && sleep $((attempt * 20))
+            done
 
-          echo "::error::El barrido no respondio 200 tras 3 intentos."
-          echo "Revisa, en la instancia EC2 (por SSM, no hace falta SSH):"
-          echo "  docker compose ps        - el contenedor esta en Restarting?"
-          echo "  docker compose logs api  - por que murio"
-          echo "Y que INTERNAL_TASK_SECRET sea el mismo en el secret de GitHub"
-          echo "y en /home/ec2-user/.env."
-          exit 1
+            echo "::error::$etiqueta no respondio 200 tras 3 intentos."
+            echo "Revisa, en la instancia EC2 (por SSM, no hace falta SSH):"
+            echo "  docker compose ps        - el contenedor esta en Restarting?"
+            echo "  docker compose logs api  - por que murio"
+            echo "Y que INTERNAL_TASK_SECRET sea el mismo en el secret de GitHub"
+            echo "y en /home/ec2-user/.env."
+            return 1
+          }
+
+          # Se ejecutan las dos aunque una falle: que la cola tenga un mal rato
+          # no es motivo para dejar sin conciliar los pedidos de este ciclo.
+          fallo=0
+
+          llamar "${BACKEND_URL%/}/internal/outbox/run" "El barrido de la cola" || fallo=1
+          # Un trabajo agotado ya genera su propio correo de alerta, pero
+          # tambien se marca aqui para que se vea en la pestana de Actions.
+          if [ -n "$RESPUESTA" ] && printf '%s' "$RESPUESTA" | grep -qv '"failed":0'; then
+            echo "::warning::Hay trabajos agotados. Revisa los pedidos en NEEDS_REVIEW."
+          fi
+
+          llamar "${BACKEND_URL%/}/internal/orders/reconcile" "La conciliacion de pedidos" || fallo=1
+          # Un pago recuperado significa que el webhook no llego: alguien pago
+          # y estuvo sin recibir nada hasta que este barrido lo encontro. No es
+          # una curiosidad, es un aviso de que los webhooks no estan llegando.
+          if [ -n "$RESPUESTA" ] && printf '%s' "$RESPUESTA" | grep -qv '"recuperados":0'; then
+            echo "::warning::Se recupero un pago que el webhook nunca trajo."
+            echo "Comprueba en Stripe que payment_intent.succeeded y checkout.session.expired"
+            echo "esten activos en el destino de eventos."
+          fi
+
+          exit $fallo

@@ -4,6 +4,7 @@ import { DigitalAssetsService } from '../storage/digital-assets.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { CatalogService } from './catalog.service';
+import { argDe } from '../../../test/helpers/mock-args';
 
 describe('CatalogService', () => {
   let prisma: {
@@ -19,6 +20,7 @@ describe('CatalogService', () => {
       delete: jest.Mock;
     };
     orderItem: { count: jest.Mock };
+    order: { deleteMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let service: CatalogService;
@@ -44,6 +46,7 @@ describe('CatalogService', () => {
         delete: jest.fn().mockResolvedValue({}),
       },
       orderItem: { count: jest.fn().mockResolvedValue(0) },
+      order: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       // Las mutaciones de variante van en transacción para poder revertir si
       // el resultado deja un producto publicado sin poder producirse.
       $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(prisma)),
@@ -98,6 +101,7 @@ describe('CatalogService', () => {
     it('sin ventas si se borra', async () => {
       await expect(service.deleteProduct('p1')).resolves.toEqual({
         deleted: true,
+        discardedAttempts: 0,
       });
       expect(prisma.product.delete).toHaveBeenCalled();
     });
@@ -148,6 +152,7 @@ describe('CatalogService', () => {
 
       await expect(service.deleteProduct('p1')).resolves.toEqual({
         deleted: true,
+        discardedAttempts: 0,
       });
     });
 
@@ -159,6 +164,57 @@ describe('CatalogService', () => {
       );
       expect(storage.deleteFile).not.toHaveBeenCalled();
       expect(digitalAssets.remove).not.toHaveBeenCalled();
+    });
+
+    it('un checkout abandonado no cuenta como venta', async () => {
+      // El caso real: el pedido #1 quedó en PENDING_PAYMENT, nadie pagó, y
+      // aun así bloqueaba el borrado del producto diciendo "1 venta".
+      // La cuenta ahora excluye lo que consta como nunca cobrado.
+      prisma.orderItem.count.mockResolvedValue(0);
+      prisma.order.deleteMany.mockResolvedValue({ count: 1 });
+
+      await expect(service.deleteProduct('p1')).resolves.toEqual({
+        deleted: true,
+        discardedAttempts: 1,
+      });
+      expect(prisma.product.delete).toHaveBeenCalled();
+    });
+
+    it('la cuenta de ventas excluye los pedidos sin cobro', async () => {
+      await service.deleteProduct('p1');
+
+      const filtro = argDe<{ where: { order: { NOT: unknown } } }>(
+        prisma.orderItem.count,
+      );
+
+      // Por la negación y no por una lista de estados "buenos": un estado
+      // nuevo debe caer del lado que protege el historial.
+      expect(filtro.where.order).toHaveProperty('NOT');
+    });
+
+    it('solo se tiran los intentos que nunca cobraron nada', async () => {
+      await service.deleteProduct('p1');
+
+      const filtro = argDe<{
+        where: {
+          paidAt: null;
+          status: { in: string[] };
+          stripePaymentIntentId: null;
+        };
+      }>(prisma.order.deleteMany);
+
+      expect(filtro.where.status.in).toEqual(['PENDING_PAYMENT', 'CANCELLED']);
+      // El estado solo no basta: tres señales, escritas juntas al cobrar.
+      expect(filtro.where.paidAt).toBeNull();
+      expect(filtro.where.stripePaymentIntentId).toBeNull();
+    });
+
+    it('el borrado de intentos y el del producto van en la misma transaccion', async () => {
+      // Si el producto se borrara fuera, un fallo suyo dejaria los pedidos ya
+      // tirados y sin nada que los justifique.
+      await service.deleteProduct('p1');
+
+      expect(prisma.$transaction).toHaveBeenCalled();
     });
 
     it('lo mismo aplica a una variante', async () => {

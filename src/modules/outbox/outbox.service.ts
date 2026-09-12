@@ -6,6 +6,7 @@ import {
   DOWNLOAD_GRANT_MAX_USES,
   DOWNLOAD_GRANT_TTL_HOURS,
 } from '../../common/constants/digital.constants';
+import { DIAS_RETENCION_TRABAJOS_HECHOS } from '../../common/constants/order.constants';
 import { DigitalDeliveryService } from '../orders/digital-delivery.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -35,6 +36,58 @@ export class OutboxService {
     private readonly orderEmailsService: OrderEmailsService,
     private readonly digitalDeliveryService: DigitalDeliveryService,
   ) {}
+
+  /**
+   * Tira los trabajos ya completados que llevan mucho tiempo ahi.
+   *
+   * La tabla crecia sin techo. A este volumen no dolia todavia, pero el indice
+   * `[status, nextAttemptAt]` que sirve para tomar trabajos se recorre en cada
+   * pasada, y una tabla que solo crece acaba haciendolo mas lento cada mes.
+   *
+   * Solo los DONE: un fallado se conserva porque es la prueba de que algo no
+   * llego a hacerse, y esa es justamente la que hay que poder mirar.
+   */
+  async purgarCompletados(): Promise<number> {
+    const limite = new Date(
+      Date.now() - DIAS_RETENCION_TRABAJOS_HECHOS * 24 * 60 * 60 * 1000,
+    );
+
+    const { count } = await this.prismaService.outboxJob.deleteMany({
+      where: { status: 'DONE', completedAt: { lt: limite } },
+    });
+
+    if (count > 0) {
+      this.logger.log(`Purga: ${count} trabajo(s) completados y caducados`);
+    }
+
+    return count;
+  }
+
+  /**
+   * Devuelve a la cola los trabajos que agotaron sus intentos.
+   *
+   * Solo toca los FAILED, y solo los de ese pedido. No los recrea: reutiliza
+   * la fila que ya existe, porque `enqueue` va con `skipDuplicates` sobre la
+   * clave de deduplicacion y encolar de nuevo no haria absolutamente nada
+   * mientras el trabajo agotado siga ahi.
+   *
+   * El contador vuelve a cero a proposito: quien reintenta desde el panel lo
+   * hace despues de arreglar la causa, y darle un solo intento antes de
+   * rendirse otra vez no ayuda a nadie.
+   */
+  async reencolarFallidos(orderId: string): Promise<number> {
+    const { count } = await this.prismaService.outboxJob.updateMany({
+      where: { orderId, status: 'FAILED' },
+      data: {
+        status: 'PENDING',
+        attempts: 0,
+        lastError: null,
+        nextAttemptAt: new Date(),
+      },
+    });
+
+    return count;
+  }
 
   /**
    * Procesa una tanda de trabajos pendientes.

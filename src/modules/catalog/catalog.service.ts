@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
+import { NUNCA_COBRADO } from '../../common/constants/order.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { DigitalAssetsService } from '../storage/digital-assets.service';
 import { StorageService } from '../storage/storage.service';
@@ -185,8 +186,18 @@ export class CatalogService {
   async deleteProduct(id: string) {
     await this.assertProductExists(id);
 
+    // Cuenta como venta lo que NO consta como nunca cobrado. Se pregunta por
+    // la negación a propósito: si mañana aparece un estado nuevo, entra por
+    // defecto en el lado que protege el historial en vez de en el que borra.
+    //
+    // Antes se contaban todas las líneas sin mirar el pedido, y un checkout
+    // abandonado —donde nadie pagó— bloqueaba el borrado del producto para
+    // siempre, diciendo además que tenía "1 venta".
     const soldUnits = await this.prismaService.orderItem.count({
-      where: { productVariant: { productId: id } },
+      where: {
+        productVariant: { productId: id },
+        order: { NOT: NUNCA_COBRADO },
+      },
     });
 
     if (soldUnits > 0) {
@@ -207,7 +218,29 @@ export class CatalogService {
       },
     });
 
-    await this.prismaService.product.delete({ where: { id } });
+    // Los intentos que nunca se pagaron se van con el producto, en la misma
+    // transacción. No es una cortesía: `OrderItem.productVariant` es
+    // `onDelete: Restrict`, así que mientras exista una sola de esas líneas la
+    // base de datos se niega a borrar la variante, por mucho que el guard de
+    // arriba haya dado el visto bueno.
+    //
+    // El `where` vuelve a exigir NUNCA_COBRADO en vez de fiarse de la cuenta
+    // anterior: si alguien paga entre una consulta y la otra, ese pedido se
+    // queda, el borrado del producto choca contra la clave foránea y la
+    // transacción entera se deshace. Preferible a haber borrado una venta.
+    const { count: intentosDescartados } =
+      await this.prismaService.$transaction(async (tx) => {
+        const borrados = await tx.order.deleteMany({
+          where: {
+            ...NUNCA_COBRADO,
+            items: { some: { productVariant: { productId: id } } },
+          },
+        });
+
+        await tx.product.delete({ where: { id } });
+
+        return borrados;
+      });
 
     // Y se borran DESPUÉS, no antes. Si fallara el borrado en la base de
     // datos con los archivos ya fuera, quedarían filas apuntando a nada, que
@@ -231,7 +264,7 @@ export class CatalogService {
       }
     }
 
-    return { deleted: true };
+    return { deleted: true, discardedAttempts: intentosDescartados };
   }
 
   /**

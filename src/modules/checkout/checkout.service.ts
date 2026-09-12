@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import type Stripe from 'stripe';
 
 import { CircuitBreaker } from '../../common/resilience/circuit-breaker';
+import { MINUTOS_VIDA_SESION } from '../../common/constants/order.constants';
 import { STORE_CURRENCY } from '../../common/money/currency';
 import { normalizeLocale } from '../notifications/i18n/email-messages';
 import { PrismaService } from '../prisma/prisma.service';
@@ -292,6 +293,13 @@ export class CheckoutService {
         : {}),
       ...(email ? { customer_email: email } : {}),
       client_reference_id: orderId,
+      // Sin esto rigen las 24 horas de Stripe: un dia entero en el que el
+      // pedido fantasma existe, bloquea el borrado del producto y no le sirve
+      // a nadie. Treinta minutos es el minimo que Stripe admite.
+      //
+      // En segundos y redondeado hacia abajo: Stripe rechaza un timestamp con
+      // decimales, y `Date.now()` viene en milisegundos.
+      expires_at: Math.floor(Date.now() / 1000) + MINUTOS_VIDA_SESION * 60,
       metadata: { orderId },
       // El PaymentIntent lleva también el id: `payment_intent.succeeded` no
       // incluye la sesión, así que sin esto no se puede saber qué pedido pagó.

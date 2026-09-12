@@ -14,6 +14,7 @@ describe('OutboxService', () => {
       update: jest.Mock;
       findUniqueOrThrow: jest.Mock;
       createMany: jest.Mock;
+      deleteMany: jest.Mock;
     };
     order: {
       findUnique: jest.Mock;
@@ -46,6 +47,7 @@ describe('OutboxService', () => {
           .fn()
           .mockResolvedValue({ attempts: 0, maxAttempts: 5, type: 'X' }),
         createMany: jest.fn().mockResolvedValue({ count: 1 }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       order: {
         findUnique: jest.fn().mockResolvedValue({
@@ -264,6 +266,46 @@ describe('OutboxService', () => {
       prisma.order.findUnique.mockResolvedValue(null);
 
       await expect(service.runPending()).resolves.toMatchObject({ taken: 1 });
+    });
+  });
+
+  describe('purgarCompletados', () => {
+    it('solo tira los DONE, y solo los viejos', async () => {
+      prisma.outboxJob.deleteMany.mockResolvedValue({ count: 4 });
+
+      await expect(service.purgarCompletados()).resolves.toBe(4);
+
+      const filtro = callArg<{
+        where: { completedAt: { lt: Date }; status: string };
+      }>(prisma.outboxJob.deleteMany);
+
+      // Un FAILED se conserva: es la prueba de que algo no llego a hacerse.
+      expect(filtro.where.status).toBe('DONE');
+
+      const dias =
+        (Date.now() - filtro.where.completedAt.lt.getTime()) /
+        (24 * 60 * 60 * 1000);
+      expect(Math.round(dias)).toBe(90);
+    });
+  });
+
+  describe('reencolarFallidos', () => {
+    it('devuelve a la cola solo los agotados de ese pedido', async () => {
+      prisma.outboxJob.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(service.reencolarFallidos('order-1')).resolves.toBe(1);
+
+      const args = callArg<{
+        where: { orderId: string; status: string };
+        data: { attempts: number; lastError: null; status: string };
+      }>(prisma.outboxJob.updateMany);
+
+      expect(args.where).toEqual({ orderId: 'order-1', status: 'FAILED' });
+      expect(args.data.status).toBe('PENDING');
+      // El contador vuelve a cero: quien reintenta ya arreglo la causa, y un
+      // solo intento antes de rendirse otra vez no le sirve a nadie.
+      expect(args.data.attempts).toBe(0);
+      expect(args.data.lastError).toBeNull();
     });
   });
 });

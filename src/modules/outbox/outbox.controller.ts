@@ -1,17 +1,14 @@
 import {
   Controller,
-  ForbiddenException,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
   Post,
-  ServiceUnavailableException,
+  UseGuards,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { SkipThrottle } from '@nestjs/throttler';
 
-import { AuthService } from '../auth/auth.service';
+import { InternalTaskGuard } from '../../common/guards/internal-task.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { OutboxService, type OutboxRunSummary } from './outbox.service';
 
@@ -30,23 +27,22 @@ const STALE_ORDER_MINUTES = 30;
  */
 @Controller('internal/outbox')
 @SkipThrottle()
+@UseGuards(InternalTaskGuard)
 export class OutboxController {
   constructor(
     private readonly outboxService: OutboxService,
-    private readonly configService: ConfigService,
     private readonly prismaService: PrismaService,
   ) {}
 
   @Post('run')
   @HttpCode(HttpStatus.OK)
-  async run(
-    @Headers('x-internal-secret') secret: string | undefined,
-  ): Promise<OutboxRunSummary> {
-    // Sin secreto configurado el endpoint queda cerrado, no abierto: un fallo
-    // de configuración no debe dejar expuesta la ejecución de trabajos.
-    this.assertSecret(secret);
+  async run(): Promise<OutboxRunSummary & { purged: number }> {
+    const resumen = await this.outboxService.runPending();
+    // La purga va después de la pasada, no antes: si el proceso muriera en
+    // medio, lo que se pierde es una limpieza, no una entrega.
+    const purged = await this.outboxService.purgarCompletados();
 
-    return this.outboxService.runPending();
+    return { ...resumen, purged };
   }
 
   /**
@@ -57,9 +53,7 @@ export class OutboxController {
    * que es lo que convierte un problema silencioso en un correo.
    */
   @Get('alerts')
-  async alerts(@Headers('x-internal-secret') secret: string | undefined) {
-    this.assertSecret(secret);
-
+  async alerts() {
     const staleSince = new Date(Date.now() - STALE_ORDER_MINUTES * 60_000);
 
     const [needsReview, failedJobs, stuckPaid, stalledJobs] = await Promise.all(
@@ -91,19 +85,5 @@ export class OutboxController {
       stalledJobs,
       staleAfterMinutes: STALE_ORDER_MINUTES,
     };
-  }
-
-  private assertSecret(secret: string | undefined): void {
-    const expected = this.configService.get<string>('INTERNAL_TASK_SECRET');
-
-    if (!expected) {
-      throw new ServiceUnavailableException(
-        'El barrido de la cola no está configurado',
-      );
-    }
-
-    if (!secret || !AuthService.safeCompare(secret, expected)) {
-      throw new ForbiddenException('Secreto inválido');
-    }
   }
 }
