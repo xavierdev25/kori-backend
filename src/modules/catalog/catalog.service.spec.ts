@@ -1,6 +1,8 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 
+import { DigitalAssetsService } from '../storage/digital-assets.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { CatalogService } from './catalog.service';
 
 describe('CatalogService', () => {
@@ -20,12 +22,19 @@ describe('CatalogService', () => {
     $transaction: jest.Mock;
   };
   let service: CatalogService;
+  let storage: { deleteFile: jest.Mock };
+  let digitalAssets: { remove: jest.Mock };
 
   beforeEach(() => {
     prisma = {
       product: {
         findUnique: jest.fn().mockResolvedValue({ id: 'p1' }),
-        findUniqueOrThrow: jest.fn(),
+        // Por defecto, un producto sin archivos: los tests de borrado que
+        // sí los tienen se lo sobrescriben.
+        findUniqueOrThrow: jest.fn().mockResolvedValue({
+          images: [],
+          variants: [],
+        }),
         update: jest.fn().mockResolvedValue({ id: 'p1' }),
         delete: jest.fn().mockResolvedValue({ id: 'p1' }),
       },
@@ -40,7 +49,14 @@ describe('CatalogService', () => {
       $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(prisma)),
     };
 
-    service = new CatalogService(prisma as unknown as PrismaService);
+    storage = { deleteFile: jest.fn().mockResolvedValue(undefined) };
+    digitalAssets = { remove: jest.fn().mockResolvedValue(undefined) };
+
+    service = new CatalogService(
+      digitalAssets as unknown as DigitalAssetsService,
+      prisma as unknown as PrismaService,
+      storage as unknown as StorageService,
+    );
   });
 
   describe('un producto con ventas no se borra', () => {
@@ -66,6 +82,65 @@ describe('CatalogService', () => {
         deleted: true,
       });
       expect(prisma.product.delete).toHaveBeenCalled();
+    });
+
+    it('borrar el producto se lleva sus archivos de los dos buckets', async () => {
+      prisma.product.findUniqueOrThrow.mockResolvedValue({
+        images: [{ storagePath: 'products/p1/foto.webp' }],
+        variants: [{ digitalAssetPath: 'privado/p1/kit.zip' }],
+      });
+
+      await service.deleteProduct('p1');
+
+      expect(storage.deleteFile).toHaveBeenCalledWith('products/p1/foto.webp');
+      expect(digitalAssets.remove).toHaveBeenCalledWith('privado/p1/kit.zip');
+    });
+
+    it('las rutas se leen antes de borrar, no despues', async () => {
+      // Al borrar en cascada desaparecen las filas que guardan las rutas: si
+      // se consultaran despues, no habria nada que limpiar y el archivo del
+      // drumkit se quedaria en el bucket privado para siempre.
+      const orden: string[] = [];
+
+      prisma.product.findUniqueOrThrow.mockImplementation(() => {
+        orden.push('leer');
+        return Promise.resolve({
+          images: [{ storagePath: 'products/p1/foto.webp' }],
+          variants: [],
+        });
+      });
+      prisma.product.delete.mockImplementation(() => {
+        orden.push('borrar');
+        return Promise.resolve({ id: 'p1' });
+      });
+
+      await service.deleteProduct('p1');
+
+      expect(orden).toEqual(['leer', 'borrar']);
+    });
+
+    it('si el bucket falla, el borrado sigue siendo correcto', async () => {
+      // La fila ya no existe: devolver error aqui le diria al panel que el
+      // borrado fallo, y el reintento respondería 404.
+      prisma.product.findUniqueOrThrow.mockResolvedValue({
+        images: [{ storagePath: 'products/p1/foto.webp' }],
+        variants: [],
+      });
+      storage.deleteFile.mockRejectedValue(new Error('S3 caido'));
+
+      await expect(service.deleteProduct('p1')).resolves.toEqual({
+        deleted: true,
+      });
+    });
+
+    it('un producto con ventas no llega a tocar los buckets', async () => {
+      prisma.orderItem.count.mockResolvedValue(2);
+
+      await expect(service.deleteProduct('p1')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(storage.deleteFile).not.toHaveBeenCalled();
+      expect(digitalAssets.remove).not.toHaveBeenCalled();
     });
 
     it('lo mismo aplica a una variante', async () => {

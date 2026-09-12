@@ -1,11 +1,14 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { DigitalAssetsService } from '../storage/digital-assets.service';
+import { StorageService } from '../storage/storage.service';
 import {
   AdminProductsQueryDto,
   CreateProductDto,
@@ -19,7 +22,13 @@ const UNIQUE_VIOLATION = 'P2002';
 
 @Injectable()
 export class CatalogService {
-  constructor(private readonly prismaService: PrismaService) {}
+  private readonly logger = new Logger(CatalogService.name);
+
+  constructor(
+    private readonly digitalAssets: DigitalAssetsService,
+    private readonly prismaService: PrismaService,
+    private readonly storageService: StorageService,
+  ) {}
 
   // ── Productos ────────────────────────────────────────────────────
 
@@ -186,9 +195,61 @@ export class CatalogService {
       );
     }
 
+    // Las rutas se leen ANTES de borrar: el borrado en cascada se lleva por
+    // delante las filas de imágenes y variantes, y con ellas la única
+    // referencia que existe a esos archivos. Después ya no hay a quién
+    // preguntarle qué había que limpiar.
+    const archivos = await this.prismaService.product.findUniqueOrThrow({
+      where: { id },
+      select: {
+        images: { select: { storagePath: true } },
+        variants: { select: { digitalAssetPath: true } },
+      },
+    });
+
     await this.prismaService.product.delete({ where: { id } });
 
+    // Y se borran DESPUÉS, no antes. Si fallara el borrado en la base de
+    // datos con los archivos ya fuera, quedarían filas apuntando a nada, que
+    // es peor que un archivo huérfano: la tienda intentaría enseñarlas.
+    for (const { storagePath } of archivos.images) {
+      if (storagePath) {
+        await this.borrarEnSilencio(() =>
+          this.storageService.deleteFile(storagePath),
+        );
+      }
+    }
+
+    // El bucket privado es el que de verdad importa: ahí vive el archivo que
+    // se vende, y dejarlo suelto es pagar almacenamiento para siempre por
+    // algo que ya no se puede comprar.
+    for (const { digitalAssetPath } of archivos.variants) {
+      if (digitalAssetPath) {
+        await this.borrarEnSilencio(() =>
+          this.digitalAssets.remove(digitalAssetPath),
+        );
+      }
+    }
+
     return { deleted: true };
+  }
+
+  /**
+   * El producto ya no existe cuando esto corre. Que falle el borrado de un
+   * archivo cuesta unos céntimos al mes; propagar la excepción le diría al
+   * panel que el borrado falló cuando en realidad ya se hizo, y el siguiente
+   * intento respondería 404.
+   */
+  private async borrarEnSilencio(accion: () => Promise<unknown>) {
+    try {
+      await accion();
+    } catch (error) {
+      this.logger.error(
+        `No se pudo borrar un archivo de un producto ya eliminado: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   // ── Variantes ────────────────────────────────────────────────────
