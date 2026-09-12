@@ -34,6 +34,23 @@ process.env['STRIPE_SUCCESS_URL'] = 'http://localhost:4321/compras';
 process.env['STRIPE_CANCEL_URL'] = 'http://localhost:4321/shop';
 
 /**
+ * Los temporizadores de fondo, apagados durante las pruebas.
+ *
+ * El e2e arranca la aplicacion entera, y con ella el temporizador de la cola y
+ * el de mantenimiento de pedidos. Ninguno deberia llegar a disparar en una
+ * suite de veinte segundos, pero "no deberia" depende de lo cargada que este
+ * la maquina: en CI, o con otra cosa corriendo a la vez, una pasada se alarga
+ * y el tic cae en mitad de una prueba, tocando la misma base de datos que esta
+ * comprobando. Eso es un fallo que aparece una vez cada cincuenta ejecuciones
+ * y se tarda una tarde en encontrar.
+ *
+ * Lo que estos temporizadores hacen ya se prueba por separado, llamando a los
+ * servicios directamente. Aqui solo estorban.
+ */
+process.env['OUTBOX_SCHEDULER'] = 'false';
+process.env['ORDER_MAINTENANCE_SCHEDULER'] = 'false';
+
+/**
  * Red de seguridad: si aun asi se colara una credencial de produccion, que se
  * vea.
  *
