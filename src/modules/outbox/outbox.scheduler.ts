@@ -17,11 +17,20 @@ const DEFAULT_INTERVAL_MS = 60_000;
  * Se usa `setInterval` y no `@nestjs/schedule` para no añadir una dependencia
  * por un temporizador de quince líneas.
  *
- * OJO con lo que este temporizador NO cubre: el contenedor de Render en plan
- * gratuito se duerme a los 15 minutos y con él muere el intervalo. Por eso el
- * barrido externo (GitHub Actions contra /internal/outbox/run) no es un lujo,
- * es lo que garantiza que un pedido pagado acabe procesándose aunque nadie
- * visite la tienda.
+ * Este temporizador es el reloj de verdad. En EC2 el contenedor no se duerme,
+ * así que mientras el proceso viva la cola se vacía cada minuto —y además cada
+ * webhook de pago la dispara al instante, sin esperar al siguiente tic—.
+ *
+ * Lo que NO cubre es que este proceso esté muerto, y para eso está el barrido
+ * externo contra /internal/outbox/run. Nació por otro motivo —cuando el
+ * backend vivía en Render, el contenedor se dormía a los 15 minutos y se
+ * llevaba el intervalo por delante— y ese motivo ya no existe, pero el papel
+ * de red de seguridad sí: si el contenedor se cae o se queda colgado, es lo
+ * único que sigue procesando un pedido ya cobrado.
+ *
+ * Conviene saber que ese barrido llega tarde: GitHub estira los crons cortos,
+ * y el de diez minutos se ejecuta cada tres horas de mediana. Para lo que hace
+ * ahora da igual; para cualquier cosa que dependa del reloj, no sirve.
  */
 @Injectable()
 export class OutboxScheduler implements OnModuleInit, OnModuleDestroy {

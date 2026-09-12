@@ -13,7 +13,8 @@ import { EMPTY, Observable, mergeMap, of } from 'rxjs';
  *
  * Los tiempos se parametrizan porque no todo cambia al mismo ritmo: el muro
  * recibe notitas nuevas continuamente, mientras que el catálogo pasa semanas
- * igual. Cachear más el catálogo ahorra arranques en frío de Render.
+ * igual. Cachear más el catálogo le ahorra consultas a la base de datos y
+ * responde antes; con el tráfico de un lanzamiento, esa diferencia se nota.
  */
 @Injectable()
 export class PublicCacheInterceptor implements NestInterceptor {

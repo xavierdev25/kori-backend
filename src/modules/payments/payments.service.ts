@@ -17,9 +17,9 @@ export class PaymentsService {
    * detecta el duplicado.
    *
    * Hacerlo al revés —procesar y luego marcar— deja una ventana en la que dos
-   * reintentos simultáneos de Stripe entran los dos. Y Render en plan gratuito
-   * tarda ~50 s en despertar, así que los reintentos solapados no son
-   * hipotéticos: son lo normal tras un rato sin tráfico.
+   * reintentos simultáneos de Stripe entran los dos. Stripe reintenta cuando un
+   * webhook tarda en responder, así que basta un despliegue en curso o una
+   * consulta lenta para que dos entregas del mismo evento se solapen.
    *
    * @returns false si ya se había registrado (duplicado, no hacer nada).
    */

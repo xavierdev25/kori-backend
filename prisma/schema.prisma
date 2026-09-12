@@ -587,9 +587,10 @@ enum OutboxJobStatus {
   FAILED
 }
 
-/// La cola vive en Postgres a propósito. El contenedor de Render se duerme a
-/// los 15 min y el Key Value gratuito solo guarda en memoria: una cola en
-/// memoria perdería el fulfillment de un pedido ya pagado, en silencio.
+/// La cola vive en Postgres a propósito, no en memoria ni en Redis. Un
+/// contenedor se reinicia —por un despliegue, por quedarse sin memoria, por lo
+/// que sea— y una cola en memoria se lleva con él el fulfillment de un pedido
+/// ya cobrado, en silencio y sin dejar rastro de que existió.
 model OutboxJob {
   id     String          @id @default(uuid())
   type   OutboxJobType

@@ -21,8 +21,8 @@ import { PrismaService } from '../prisma/prisma.service';
  * comprobación.
  *
  * No sirve el archivo: valida y redirige a una URL firmada que vive 60
- * segundos. Pasar 80 MB por el contenedor de Render sería regalarle memoria y
- * tiempo de CPU a algo que el almacenamiento hace mejor.
+ * segundos. Pasar 80 MB por el contenedor sería regalarle memoria y tiempo de
+ * CPU a algo que el almacenamiento hace mejor.
  */
 @Controller('downloads')
 export class DownloadsController {

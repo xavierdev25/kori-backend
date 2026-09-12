@@ -225,7 +225,7 @@ export function validateEnvironment(
   if (isProduction && !taskSecret) {
     console.warn(
       '[env] INTERNAL_TASK_SECRET no definido: el barrido externo de la cola quedará cerrado. ' +
-        'Sin él, un pedido pagado puede quedarse sin procesar mientras Render duerme.',
+        'Sin él, si este contenedor muere no queda nadie que procese un pedido ya pagado.',
     );
   }
 
@@ -252,8 +252,8 @@ export function validateEnvironment(
     // No es un error: el valor por defecto en producción ya es 'none'.
     // Se avisa para que la decisión sea consciente.
     console.warn(
-      '[env] COOKIE_SAMESITE no definido: se usará "none" (backend y panel en dominios distintos). ' +
-        'Con un dominio propio compartido, define COOKIE_SAMESITE=lax.',
+      '[env] COOKIE_SAMESITE no definido: se usará "none". ' +
+        'Si el backend y el panel comparten dominio (api.x.com y panel.x.com), define COOKIE_SAMESITE=lax: es más estricto y la sesión funciona igual.',
     );
   }
 

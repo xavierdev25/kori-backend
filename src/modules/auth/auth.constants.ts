@@ -20,13 +20,21 @@ export const REFRESH_TOKEN_TTL_DAYS = 7;
 /**
  * Configuración de las cookies de sesión.
  *
- * OJO con `sameSite`: hoy el backend vive en onrender.com y el panel en
- * vercel.app, que son sitios distintos. Una cookie `Lax` NO se envía en
- * peticiones cross-site, así que el panel se quedaría sin sesión. Por eso el
- * valor por defecto en producción es `none` (que además exige `secure`).
+ * OJO con `sameSite`. El valor por defecto en producción es `none` porque
+ * nació cuando el backend estaba en onrender.com y el panel en vercel.app:
+ * sitios distintos, y una cookie `Lax` no viaja entre sitios, así que el panel
+ * se quedaba sin sesión.
  *
- * Cuando backend y panel compartan dominio (api.kori.mx / admin.kori.mx),
- * poner COOKIE_SAMESITE=lax, que es más estricto.
+ * Eso ya no es cierto. Hoy son api.insecurekori.com y panel.insecurekori.com,
+ * que comparten dominio registrable y por tanto son el MISMO sitio para
+ * SameSite —que mira el dominio, no el origen; CORS es otra cosa—. Con
+ * COOKIE_SAMESITE=lax la sesión seguiría funcionando igual y la cookie dejaría
+ * de enviarse en peticiones desde fuera, que es una defensa real contra CSRF.
+ *
+ * No se cambia el valor por defecto aquí: tocar el `sameSite` de la cookie de
+ * sesión desde el código significa que el próximo despliegue decide por ti si
+ * alguien puede entrar al panel. Se cambia poniendo COOKIE_SAMESITE=lax en el
+ * .env del servidor, donde se revierte en un minuto si algo va mal.
  */
 export function buildCookieOptions(
   configService: ConfigService,

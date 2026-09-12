@@ -298,26 +298,31 @@ docker run --rm --env-file .env kori-backend:migrator
 
 ## Keeping free tiers awake
 
-Two independent timers can take this service down, and they need different
-solutions:
+This section used to describe two timers that could take the service down on
+the free tiers it started on: Supabase pausing after ~7 idle days, and Render
+spinning the container down after 15 idle minutes. **Neither applies any more.**
+The backend runs on EC2, which does not sleep, and the database is RDS, which
+does not pause.
 
-| Timer | Trigger | Consequence | Solution |
-|---|---|---|---|
-| **Supabase pause** | ~7 days without database activity | Project pauses → `PrismaService` fails at boot → Render crash-loops → every request hangs indefinitely | `.github/workflows/keep-alive.yml` pings `/health/readiness` (`SELECT 1`) every 6 h |
-| **Render spin-down** | 15 min without HTTP traffic | Next visitor waits ~50 s for a cold start | External uptime monitor every 5–10 min |
+What survives from that era, and why:
 
-**Why GitHub Actions does not solve the Render spin-down:** scheduled workflows
-are frequently delayed (sometimes past 30 min), and GitHub disables them after
-60 days without commits — precisely the idle scenario being guarded against.
-It is reliable enough for a 7-day window, not for a 15-minute one.
+| Mechanism | Still needed? | Why |
+|---|---|---|
+| `keep-alive.yml` every 6 h | Yes, as a cheap liveness probe | It no longer prevents anything from sleeping, but a scheduled `GET /health/readiness` that fails is a free signal that the instance or the database is down |
+| External sweep against `/internal/outbox/run` | Yes, but only as a backstop | The in-process timer is the real clock now. This is what still runs if the container is dead |
 
-**Cost of staying warm:** Render's free tier allows 750 instance-hours/month
-and a month is ~730 h, so keeping the service up 24/7 consumes nearly the whole
-allowance. Pinging only during active hours (e.g. 09:00–02:00) leaves headroom.
+**Do not rely on GitHub Actions as a clock.** Measured over the last ten
+scheduled runs of this repository, a `*/10` cron fired every **185 minutes**
+median and the hourly `alerts` cron every **248** — GitHub stretches short
+schedules the more frequent they are, and only the 6-hour one arrives on time.
+It also disables scheduled workflows after 60 days without commits. Anything
+that has to happen on a schedule lives inside the process
+(`OutboxScheduler`, `OrderMaintenanceScheduler`); GitHub is the net for when
+the process itself is gone.
 
-Recovering from a pause: resume the project in Supabase, verify that
-`DATABASE_URL` / `DIRECT_URL` still match the dashboard (the pooler host can
-change), then redeploy on Render if it stayed in backoff.
+For the one thing that genuinely cannot live inside the container — alerting
+that the container is down — an external scheduler that actually keeps time
+(EventBridge Scheduler, or any uptime monitor) is the right tool.
 
 ---
 

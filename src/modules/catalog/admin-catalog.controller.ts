@@ -194,9 +194,9 @@ export class AdminCatalogController {
    * El archivo que se vende. Es el equivalente digital del archivo de
    * impresión: sin él no se puede publicar ni cobrar.
    *
-   * Va a memoria y de ahí al bucket. Un drumkit de 80 MB en el contenedor de
-   * Render (512 MB) cabe de sobra; el tope de 500 MB es el techo duro antes
-   * de que empiece a ser un problema de memoria y no de negocio.
+   * Va a memoria y de ahí al bucket. Un drumkit de 80 MB cabe de sobra en la
+   * memoria del contenedor; el tope de 500 MB es el techo duro antes de que
+   * empiece a ser un problema de memoria y no de negocio.
    */
   @Post(':id/variants/:variantId/asset')
   @UseInterceptors(

@@ -18,9 +18,14 @@ const STALE_ORDER_MINUTES = 30;
 /**
  * Barrido externo de la cola.
  *
- * Existe porque el temporizador interno muere cuando Render duerme el
- * contenedor. Un cron de GitHub Actions llama aquí y garantiza que un pedido
- * pagado se procese aunque no haya visitas.
+ * El temporizador interno del contenedor es quien vacía la cola de verdad.
+ * Esto es la red para cuando ese contenedor no está: un cron de GitHub Actions
+ * llama aquí, y si el proceso se cayó o se quedó colgado, es lo único que
+ * queda entre un pedido ya cobrado y el silencio.
+ *
+ * No sirve como reloj: GitHub estira los crons cortos y este se ejecuta cada
+ * tres horas de mediana, no cada diez minutos. Lo que tiene que pasar a su
+ * hora vive dentro del proceso.
  *
  * Se protege con un secreto compartido y no con JWT: quien llama es una
  * máquina, no una persona con sesión.

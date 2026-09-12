@@ -8,8 +8,8 @@ import { PublicCatalogService } from './public-catalog.service';
  * Catálogo público que consume la landing de Astro. Sin autenticación.
  *
  * Se cachea 5 minutos: el catálogo cambia como mucho unas pocas veces al mes,
- * y cada respuesta servida desde caché es un arranque en frío de Render que el
- * comprador no sufre.
+ * y cada respuesta servida desde caché es una consulta menos a la base de
+ * datos justo en la página por la que entra todo el mundo.
  */
 @Controller('products')
 @UseInterceptors(new PublicCacheInterceptor(300, 600))

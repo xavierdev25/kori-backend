@@ -5,9 +5,9 @@ import { Logger, ServiceUnavailableException } from '@nestjs/common';
  *
  * El problema que resuelve no es que Stripe o Backblaze fallen — eso ya se
  * maneja con reintentos. Es que se pongan *lentos*: cada petición se queda
- * treinta segundos esperando, ocupando memoria del contenedor, y con unas
- * pocas a la vez los 512 MB de Render se acaban. El proceso muere y con él
- * cae todo, no solo lo que dependía del servicio caído.
+ * treinta segundos esperando y ocupando memoria, y con suficientes a la vez
+ * el contenedor se queda sin. El proceso muere y con él cae todo, no solo lo
+ * que dependía del servicio caído.
  *
  * Tras varios fallos seguidos, el circuito se abre: durante un rato las
  * llamadas fallan al instante en vez de esperar. Pasado ese rato deja pasar

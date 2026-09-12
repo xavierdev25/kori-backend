@@ -200,11 +200,11 @@ export class StorageService implements OnModuleInit {
     } catch (error) {
       // Se avisa muy fuerte, pero NO se relanza.
       //
-      // Antes esto tumbaba el arranque entero de la aplicación. Con Supabase
-      // pausándose a los 7 días de inactividad y Render reiniciando el
-      // contenedor tras 15 minutos sin tráfico, bastaba que coincidieran para
-      // que la API no levantara: ni pedidos, ni webhook de Stripe, ni panel.
-      // Todo caído por no poder subir una imagen.
+      // Antes esto tumbaba el arranque entero de la aplicación: si el almacén
+      // no respondía justo en el momento de levantar el contenedor, la API no
+      // arrancaba. Ni pedidos, ni webhook de Stripe, ni panel — todo caído por
+      // no poder subir una imagen. Un servicio de fuera no puede tener voto
+      // sobre si esta aplicación existe.
       //
       // Lo que depende del almacén falla con un 503 claro; lo que no, sigue.
       this.reachable = false;

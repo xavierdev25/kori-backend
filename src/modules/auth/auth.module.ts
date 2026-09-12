@@ -24,7 +24,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 
         return {
           // JWT_ACCESS_SECRET es el nombre nuevo; se cae a JWT_SECRET para que
-          // el despliegue no exija tocar variables en Render antes de subir.
+          // el despliegue no exija tocar el .env del servidor antes de subir.
           secret:
             configService.get<string>('JWT_ACCESS_SECRET') ??
             configService.getOrThrow<string>('JWT_SECRET'),
