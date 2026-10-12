@@ -5,7 +5,8 @@ overrides:
   # @nestjs/platform-express arrastra multer 2.1.x de forma transitiva, y esa
   # version tiene dos avisos de seguridad. Es la unica de todo el arbol que
   # llega al contenedor de produccion, asi que se fuerza la parcheada.
-  multer: ">=2.3.0"
+  # 2.4.0: subidas abortadas que dejaban escrituras huerfanas en disco (DoS).
+  multer: "^2.4.0"
 
   # NOTA sobre sanitize-html: aqui ponia que se quedaba en 2.17.4 porque la
   # 2.17.6 arrastra htmlparser2@12 (solo ESM) y rompia Jest, y que sus avisos
@@ -25,6 +26,25 @@ overrides:
 
   postcss: ">=8.5.23"
   nanoid: ">=3.3.8"
+
+  # Avisos de octubre de 2026 en dependencias que trae express (por
+  # @nestjs/platform-express) o sanitize-html. Van con ^ y no con >=: un
+  # parche de seguridad no debe poder colar una version mayor sin que nadie
+  # lo decida.
+  #
+  # proxy-addr (CRITICO): es quien decide la IP real del cliente cuando
+  # TRUST_PROXY nombra proxies de confianza. Con TRUST_PROXY como lista de
+  # subredes (p. ej. los rangos de Cloudflare), una IPv6 que envuelve una IPv4
+  # podia pasar por proxy de confianza y falsear la IP: la que usan los limites
+  # por IP y las huellas de notitas, contacto y la señal.
+  proxy-addr: "^2.0.8"
+
+  # body-parser: denegacion de servicio con un `limit` invalido.
+  body-parser: "^2.3.0"
+
+  # source-map-js: llega por sanitize-html > postcss; denegacion de servicio
+  # con mapas de origen manipulados.
+  source-map-js: "^1.2.2"
 
 onlyBuiltDependencies:
   - "@nestjs/core"
