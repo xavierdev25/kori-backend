@@ -89,6 +89,48 @@ model Subscriber {
   @@map("subscribers")
 }
 
+/// "La señal" de DICIEMBRE+ [fin de año]: quien deja su nombre y su correo
+/// en la portada para recibir los correos personales de la campaña.
+///
+/// Va aparte de `Subscriber` a propósito. Son dos listas con finalidades y
+/// plazos distintos en el aviso de privacidad —los avisos de música o de la
+/// tienda viven hasta que alguien se da de baja; la señal se borra tras la
+/// campaña si la persona no aceptó recibir novedades—, y mezclarlas haría
+/// imposible cumplir los dos a la vez.
+///
+/// Las reglas de forma (idioma, longitud del nombre, correo en minúsculas,
+/// versión del aviso) también están como CHECK en la base: el DTO es la
+/// primera barrera, no la única.
+model SignalSignup {
+  id String @id @default(uuid())
+
+  /// Nombre o apodo, ya en texto plano: es con lo que se saluda en el correo.
+  name String
+
+  /// Siempre en minúsculas: es la clave que impide apuntarse dos veces.
+  email String @unique
+
+  /// El idioma de la página desde la que se apuntó, para escribirle en el suyo.
+  locale String @default("es")
+
+  /// Consentimiento opcional y separado: novedades después de la campaña
+  /// (música, merch, shows). Sin él, la fila se borra al cerrar la campaña.
+  marketingOptIn Boolean @default(false) @map("marketing_opt_in")
+
+  /// Fecha (AAAA-MM-DD) del aviso de privacidad que aceptó. Junto con
+  /// `createdAt` es la prueba del consentimiento obligatorio: qué texto se le
+  /// enseñó y cuándo dijo que sí.
+  privacyVersion String @map("privacy_version")
+
+  /// Hasheada con HASH_PEPPER, igual que en el resto de tablas.
+  ipHash String? @map("ip_hash")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("signal_signups")
+}
+
 /// Ajustes editables desde el dashboard (contador, link del álbum…).
 model AppSetting {
   key       String   @id
