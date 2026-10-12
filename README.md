@@ -173,8 +173,9 @@ docker compose up --build
 | `GET` | `/notes/public` | Returns the latest notes (max 200) |
 | `POST` | `/notes/text` | Creates a text note |
 | `POST` | `/notes/drawing` | Creates a drawing note (multipart/form-data) |
+| `POST` | `/signal` | "La señal" signup: name + email for the DICIEMBRE+ campaign emails |
 
-Rate limits: `/notes/text` 5 req/60s · `/notes/drawing` 3 req/60s
+Rate limits: `/notes/text` 5 req/60s · `/notes/drawing` 3 req/60s · `/signal` 5 req/60s
 
 ### Auth
 
@@ -240,6 +241,7 @@ Stack traces are never exposed. `requestId` is included in every error for corre
 | `POST /auth/login` | 5 requests / 60s |
 | `POST /notes/text` | 5 requests / 60s |
 | `POST /notes/drawing` | 3 requests / 60s |
+| `POST /signal` | 5 requests / 60s |
 | `GET /notes/public` | 60 requests / 60s (global) |
 | `/admin/*` | 60 requests / 60s (global) |
 | `/health/*` | No limit |
@@ -378,6 +380,35 @@ DELETE /admin/subscribers/:id                 (JWT, idempotent)
 
 Emails are normalized to lowercase; the client IP is stored only as an
 HMAC-SHA256 hash (`HASH_PEPPER`).
+
+### La señal (DICIEMBRE+ [fin de año] signup)
+
+```
+POST   /signal                    { name, email, locale?, marketingOptIn?, consent: true, privacyVersion }
+                                  → 201 { signedUp: true } | 409 duplicate | 400 invalid (5/min throttle)
+GET    /admin/signal?page&limit   (JWT) → data + meta.total + meta.marketingOptIn
+DELETE /admin/signal/:id          (JWT, idempotent)
+```
+
+The landing's name + email form for the campaign's personal emails, shown
+and exported to CSV from the dashboard ("La señal"). Table `signal_signups`,
+separate from `subscribers` on purpose: the privacy notice gives each list a
+different purpose and retention.
+
+- `consent` must be `true` (the mandatory consent); `marketingOptIn` is the
+  separate, optional one ("what comes next"). `privacyVersion` is the date of
+  the privacy notice the person accepted — with `created_at`, that is the
+  consent record.
+- The name is stripped to plain text and capped at 60 chars; the email is
+  lowercased. The same rules are CHECK constraints in the table, plus RLS like
+  every table with personal data.
+- A repeated email returns 409 and changes nothing, so nobody can rename
+  someone else by knowing their address.
+- The IP is stored only as an HMAC-SHA256 hash (`HASH_PEPPER`), never returned.
+
+**Retention (privacy notice):** rows with `marketing_opt_in = false` must be
+deleted no later than six months after the campaign ends. Unsubscribe or
+deletion requests are handled with `DELETE /admin/signal/:id`.
 
 ### App settings (landing countdown / album link)
 

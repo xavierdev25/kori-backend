@@ -30,6 +30,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { PrismaService } from './modules/prisma/prisma.service';
 import { SettingsModule } from './modules/settings/settings.module';
+import { SignalModule } from './modules/signal/signal.module';
 import { TelemetryModule } from './modules/telemetry/telemetry.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { SubscribersModule } from './modules/subscribers/subscribers.module';
@@ -59,6 +60,7 @@ import { SubscribersModule } from './modules/subscribers/subscribers.module';
     StorageModule,
     NotesModule,
     SubscribersModule,
+    SignalModule,
     SettingsModule,
     TelemetryModule,
     AuthModule,
