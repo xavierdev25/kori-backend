@@ -6,7 +6,8 @@ overrides:
   # version tiene dos avisos de seguridad. Es la unica de todo el arbol que
   # llega al contenedor de produccion, asi que se fuerza la parcheada.
   # 2.4.0: subidas abortadas que dejaban escrituras huerfanas en disco (DoS).
-  multer: "^2.4.0"
+  # 2.5.0: DoS con una escritura asincrona pendiente.
+  multer: "^2.5.0"
 
   # NOTA sobre sanitize-html: aqui ponia que se quedaba en 2.17.4 porque la
   # 2.17.6 arrastra htmlparser2@12 (solo ESM) y rompia Jest, y que sus avisos
@@ -39,8 +40,9 @@ overrides:
   # por IP y las huellas de notitas, contacto y la señal.
   proxy-addr: "^2.0.8"
 
-  # body-parser: denegacion de servicio con un `limit` invalido.
-  body-parser: "^2.3.0"
+  # body-parser: denegacion de servicio con un `limit` invalido (2.3.0) y con
+  # bytes de mas al final del cuerpo (2.4.0).
+  body-parser: "^2.4.0"
 
   # source-map-js: llega por sanitize-html > postcss; denegacion de servicio
   # con mapas de origen manipulados.
