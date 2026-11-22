@@ -55,7 +55,14 @@ export class LettersService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Sube con cada moderación. Una lectura que empezó antes de moderar y
+   * termina después no guarda su resultado (ya es viejo).
+   */
+  private generacion = 0;
+
   private olvidarArchivo() {
+    this.generacion += 1;
     this.archivo = null;
   }
 
@@ -108,6 +115,7 @@ export class LettersService {
     if (this.archivo && this.archivo.hasta > Date.now()) {
       return this.archivo.datos;
     }
+    const generacion = this.generacion;
     const cartas = await this.prisma.experienceLetter.findMany({
       where: { status: 'APPROVED' },
       orderBy: { reviewedAt: 'desc' },
@@ -117,7 +125,9 @@ export class LettersService {
     const datos = {
       data: cartas.map((c) => ({ id: c.id, to: c.toName, text: c.text })),
     };
-    this.archivo = { hasta: Date.now() + ARCHIVO_TTL_MS, datos };
+    if (generacion === this.generacion) {
+      this.archivo = { hasta: Date.now() + ARCHIVO_TTL_MS, datos };
+    }
     return datos;
   }
 
@@ -198,6 +208,7 @@ export class LettersService {
         }
         throw error;
       });
+    this.olvidarArchivo(); // después de escribir: nada vuelve a cachear lo viejo
     return { id, status };
   }
 
@@ -214,6 +225,7 @@ export class LettersService {
         }
         throw error;
       });
+    this.olvidarArchivo();
     return { deleted: true, id };
   }
 }

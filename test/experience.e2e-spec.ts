@@ -64,6 +64,7 @@ function crearPrisma(passwordHash: string) {
       update: jest.fn().mockResolvedValue({}),
     },
     experienceSession: { create: jest.fn().mockResolvedValue({}) },
+    $executeRaw: jest.fn().mockResolvedValue(0),
     experienceProgress: {
       upsert: jest.fn().mockResolvedValue({ signupId: 'signup-1' }),
       findUniqueOrThrow: jest.fn().mockResolvedValue(VACIO),

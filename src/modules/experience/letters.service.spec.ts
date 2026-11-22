@@ -118,6 +118,21 @@ describe('LettersService', () => {
     );
   });
 
+  it('una lectura que empezó antes de moderar no deja guardado lo viejo', async () => {
+    const { servicio, prisma } = crear();
+    let soltar!: (v: unknown) => void;
+    prisma.experienceLetter.findMany.mockReturnValueOnce(
+      new Promise((r) => (soltar = r)),
+    );
+    const lenta = servicio.approved();
+    await servicio.review('c1', 'approved');
+    soltar([{ id: 'viejo', toName: 'Ana', text: 'antes' }]);
+    await lenta;
+    await servicio.approved();
+    // la lenta no se guardó: la siguiente volvió a la base
+    expect(prisma.experienceLetter.findMany).toHaveBeenCalledTimes(2);
+  });
+
   it('el archivo se guarda un momento y se tira al moderar', async () => {
     const { servicio, prisma } = crear();
     await servicio.approved();

@@ -25,6 +25,7 @@ function crear(existente: Record<string, unknown> | null) {
       update: jest.fn().mockResolvedValue({}),
     },
     experienceSession: { create: jest.fn().mockResolvedValue({}) },
+    $executeRaw: jest.fn().mockResolvedValue(0),
   };
   const prisma = {
     $transaction: jest.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -92,6 +93,14 @@ describe('ExperienceService.register', () => {
     expect(tx.experienceSession.create).toHaveBeenCalled();
     // la respuesta es la de lo que se mandó: no revela lo guardado
     expect(r.eventZone).toBe(true);
+  });
+});
+
+describe('ExperienceService.register: sesiones acotadas', () => {
+  it('cierra las sesiones más viejas de la misma persona', async () => {
+    const { servicio, tx } = crear(null);
+    await servicio.register(DTO);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
   });
 });
 

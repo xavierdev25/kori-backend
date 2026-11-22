@@ -15,6 +15,9 @@ export interface RegistroRespuesta {
   eventZone: boolean;
 }
 
+/** Sesiones vivas por persona (sus navegadores); las más viejas se cierran. */
+export const SESIONES_POR_PERSONA = 10;
+
 /** Cada cuánto se anota "última vez visto" (no en cada petición). */
 const ANOTAR_VISTO_MS = 60 * 60 * 1000;
 
@@ -117,6 +120,17 @@ export class ExperienceService {
       await tx.experienceSession.create({
         data: { signupId: id, tokenHash: this.huella(token) },
       });
+      // Cada registro (otro navegador, otro celular) abre una sesión: se
+      // quedan las más recientes, para que la tabla no crezca sin fin.
+      await tx.$executeRaw`
+        DELETE FROM experience_sessions
+        WHERE signup_id = ${id}
+          AND id NOT IN (
+            SELECT id FROM experience_sessions
+            WHERE signup_id = ${id}
+            ORDER BY last_seen_at DESC, created_at DESC
+            LIMIT ${SESIONES_POR_PERSONA}
+          )`;
       return id;
     });
 
