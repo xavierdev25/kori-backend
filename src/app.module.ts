@@ -19,6 +19,7 @@ import { LatencyRegistry } from './common/observability/latency.registry';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ContactModule } from './modules/contact/contact.module';
+import { ExperienceModule } from './modules/experience/experience.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
 import { HealthModule } from './modules/health/health.module';
@@ -61,6 +62,7 @@ import { SubscribersModule } from './modules/subscribers/subscribers.module';
     NotesModule,
     SubscribersModule,
     SignalModule,
+    ExperienceModule,
     SettingsModule,
     TelemetryModule,
     AuthModule,

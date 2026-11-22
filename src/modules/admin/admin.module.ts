@@ -2,12 +2,14 @@ import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module';
 import { ContactModule } from '../contact/contact.module';
+import { ExperienceModule } from '../experience/experience.module';
 import { NotesModule } from '../notes/notes.module';
 import { SettingsModule } from '../settings/settings.module';
 import { SignalModule } from '../signal/signal.module';
 import { StorageModule } from '../storage/storage.module';
 import { SubscribersModule } from '../subscribers/subscribers.module';
 import { AdminContactController } from './admin-contact.controller';
+import { AdminExperienceController } from './admin-experience.controller';
 import { AdminNotesController } from './admin-notes.controller';
 import { AdminNotesService } from './admin-notes.service';
 import { AdminSettingsController } from './admin-settings.controller';
@@ -18,6 +20,7 @@ import { AdminSubscribersController } from './admin-subscribers.controller';
   imports: [
     AuthModule,
     ContactModule,
+    ExperienceModule,
     NotesModule,
     StorageModule,
     SettingsModule,
@@ -26,6 +29,7 @@ import { AdminSubscribersController } from './admin-subscribers.controller';
   ],
   controllers: [
     AdminContactController,
+    AdminExperienceController,
     AdminNotesController,
     AdminSettingsController,
     AdminSignalController,

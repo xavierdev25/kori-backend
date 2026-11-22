@@ -18,7 +18,9 @@ overrides:
 
   # `qs` llega por express y tiene dos avisos de denegacion de servicio. Es
   # quien parsea la query string de CADA peticion, asi que se fuerza.
-  qs: ">=6.16.0"
+  # (noviembre de 2026: 6.16.1 corrige un fallo de `stringify` con
+  # arrayFormat 'comma' que tumbaba el proceso)
+  qs: ">=6.16.1"
 
   # `deepmerge-ts` entra por el cargador de configuracion de Prisma. Solo se
   # usa al aplicar migraciones, no en el camino de una peticion, pero el
@@ -47,6 +49,12 @@ overrides:
   # source-map-js: llega por sanitize-html > postcss; denegacion de servicio
   # con mapas de origen manipulados.
   source-map-js: "^1.2.2"
+
+  # effect (noviembre de 2026): ReDoS en las expresiones que compila
+  # Schema.TemplateLiteral. Llega por @prisma/client > prisma > @prisma/config,
+  # solo al cargar la configuracion de Prisma (migraciones), no en el camino
+  # de una peticion; el parche es de la misma mayor.
+  effect: "^3.22.1"
 
 onlyBuiltDependencies:
   - "@nestjs/core"

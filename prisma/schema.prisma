@@ -105,7 +105,8 @@ model SignalSignup {
   id String @id @default(uuid())
 
   /// Nombre o apodo, ya en texto plano: es con lo que se saluda en el correo.
-  name String
+  /// Vacío en los registros de la experiencia del caballo, que no lo piden.
+  name String?
 
   /// Siempre en minúsculas: es la clave que impide apuntarse dos veces.
   email String @unique
@@ -125,10 +126,92 @@ model SignalSignup {
   /// Hasheada con HASH_PEPPER, igual que en el resto de tablas.
   ipHash String? @map("ip_hash")
 
+  /// De dónde llegó: "senal" (el formulario anterior de la portada) o
+  /// "experiencia" (el registro de la experiencia del caballo).
+  source String @default("senal")
+
+  /// Ubicación que dio al registrarse (experiencia): país ISO de dos letras,
+  /// estado o provincia y ciudad, en texto plano. Sirve para avisarle de
+  /// actividades cerca y para saber si está en la zona del evento.
+  country String?
+  region  String?
+  city    String?
+
+  /// Confirmó tener 18 años o más, o el permiso de su mamá, papá o tutor.
+  ageConfirmed Boolean @default(false) @map("age_confirmed")
+
+  /// Si la ubicación cae en la zona metropolitana de Guadalajara (la calcula
+  /// el backend: ver experience/event-zone.ts).
+  eventZone Boolean @default(false) @map("event_zone")
+
+  sessions ExperienceSession[]
+  progress ExperienceProgress?
+
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([createdAt])
+  @@index([eventZone])
   @@map("signal_signups")
+}
+
+/// Una sesión de la experiencia: lo que identifica a quien se registró para
+/// guardar su progreso del juego. El token vive en su navegador; aquí solo su
+/// huella (HMAC con HASH_PEPPER), así que una copia de la base no sirve para
+/// hacerse pasar por nadie.
+model ExperienceSession {
+  id         String       @id @default(uuid())
+  signupId   String       @map("signup_id")
+  signup     SignalSignup @relation(fields: [signupId], references: [id], onDelete: Cascade)
+  tokenHash  String       @unique @map("token_hash")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  lastSeenAt DateTime     @default(now()) @map("last_seen_at")
+
+  @@index([signupId])
+  @@map("experience_sessions")
+}
+
+/// El progreso de "Aún aquí" de cada registro. Las reglas (qué abre cada
+/// canción, qué ids existen) están en experience/aunaqui.rules.ts, copia de
+/// public/juego/aunaqui-config.js del frontend.
+model ExperienceProgress {
+  signupId   String       @id @map("signup_id")
+  signup     SignalSignup @relation(fields: [signupId], references: [id], onDelete: Cascade)
+  estrellas  Int          @default(0)
+  record     Int          @default(0)
+  recorridos Int          @default(0)
+  camino     Int          @default(0)
+  recuerdos  String[]     @default([])
+  paginas    String[]     @default([])
+  encuentros String[]     @default([])
+  logros     String[]     @default([])
+  abiertas   String[]     @default([])
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  @@map("experience_progress")
+}
+
+/// Una carta pública de "Cartas que no envié". A propósito SIN relación con
+/// el registro ni huella de IP: el registro promete que no estarán
+/// conectadas. Se publica solo cuando alguien del equipo la aprueba; al
+/// rechazarla se borra su texto (queda el id, para que quien la escribió vea
+/// "no se publicó").
+model ExperienceLetter {
+  id         String                 @id @default(uuid())
+  toName     String                 @map("to_name")
+  text       String
+  locale     String                 @default("es")
+  status     ExperienceLetterStatus @default(PENDING)
+  createdAt  DateTime               @default(now()) @map("created_at")
+  reviewedAt DateTime?              @map("reviewed_at")
+
+  @@index([status, createdAt])
+  @@map("experience_letters")
+}
+
+enum ExperienceLetterStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 /// Ajustes editables desde el dashboard (contador, link del álbum…).
