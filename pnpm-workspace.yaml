@@ -6,7 +6,8 @@ overrides:
   # version tiene dos avisos de seguridad. Es la unica de todo el arbol que
   # llega al contenedor de produccion, asi que se fuerza la parcheada.
   # 2.4.0: subidas abortadas que dejaban escrituras huerfanas en disco (DoS).
-  multer: "^2.4.0"
+  # 2.5.0: DoS con una escritura asincrona pendiente.
+  multer: "^2.5.0"
 
   # NOTA sobre sanitize-html: aqui ponia que se quedaba en 2.17.4 porque la
   # 2.17.6 arrastra htmlparser2@12 (solo ESM) y rompia Jest, y que sus avisos
@@ -17,7 +18,9 @@ overrides:
 
   # `qs` llega por express y tiene dos avisos de denegacion de servicio. Es
   # quien parsea la query string de CADA peticion, asi que se fuerza.
-  qs: ">=6.16.0"
+  # (noviembre de 2026: 6.16.1 corrige un fallo de `stringify` con
+  # arrayFormat 'comma' que tumbaba el proceso)
+  qs: ">=6.16.1"
 
   # `deepmerge-ts` entra por el cargador de configuracion de Prisma. Solo se
   # usa al aplicar migraciones, no en el camino de una peticion, pero el
@@ -39,12 +42,19 @@ overrides:
   # por IP y las huellas de notitas, contacto y la señal.
   proxy-addr: "^2.0.8"
 
-  # body-parser: denegacion de servicio con un `limit` invalido.
-  body-parser: "^2.3.0"
+  # body-parser: denegacion de servicio con un `limit` invalido (2.3.0) y con
+  # bytes de mas al final del cuerpo (2.4.0).
+  body-parser: "^2.4.0"
 
   # source-map-js: llega por sanitize-html > postcss; denegacion de servicio
   # con mapas de origen manipulados.
   source-map-js: "^1.2.2"
+
+  # effect (noviembre de 2026): ReDoS en las expresiones que compila
+  # Schema.TemplateLiteral. Llega por @prisma/client > prisma > @prisma/config,
+  # solo al cargar la configuracion de Prisma (migraciones), no en el camino
+  # de una peticion; el parche es de la misma mayor.
+  effect: "^3.22.1"
 
 onlyBuiltDependencies:
   - "@nestjs/core"

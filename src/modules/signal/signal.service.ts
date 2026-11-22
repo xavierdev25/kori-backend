@@ -13,11 +13,20 @@ export interface SignalSignupResponse {
 /** Lo que ve el panel: nunca la huella de la IP. */
 export interface SignalSignupRecord {
   id: string;
-  name: string;
+  /** Vacío en los registros de la experiencia del caballo (no lo piden). */
+  name: string | null;
   email: string;
   locale: string;
   marketingOptIn: boolean;
   privacyVersion: string;
+  /** "senal" (el formulario anterior) o "experiencia" (el caballo). */
+  source: string;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  ageConfirmed: boolean;
+  /** En la zona metropolitana de Guadalajara (el evento). */
+  eventZone: boolean;
   createdAt: Date;
 }
 
@@ -30,6 +39,8 @@ export interface PaginatedSignalSignupsResponse {
     totalPages: number;
     /** Cuántos aceptaron también las novedades: los que se quedan tras la campaña. */
     marketingOptIn: number;
+    /** Cuántos están en la zona del evento (Guadalajara). */
+    eventZone: number;
   };
 }
 
@@ -40,6 +51,12 @@ const signupSelect = {
   locale: true,
   marketingOptIn: true,
   privacyVersion: true,
+  source: true,
+  country: true,
+  region: true,
+  city: true,
+  ageConfirmed: true,
+  eventZone: true,
   createdAt: true,
 } satisfies Prisma.SignalSignupSelect;
 
@@ -70,6 +87,7 @@ export class SignalService {
           marketingOptIn: dto.marketingOptIn ?? false,
           privacyVersion: dto.privacyVersion,
           ipHash: hmacSha256OrNull(ip, pepper),
+          source: 'senal',
         },
         select: { id: true },
       });
@@ -89,23 +107,36 @@ export class SignalService {
     }
   }
 
+  /**
+   * La lista del panel. `soloZona` deja solo a quienes están en la zona del
+   * evento (para escribirles cuando haya fecha y lugar).
+   */
   async findAll(
     page: number,
     limit: number,
+    soloZona = false,
   ): Promise<PaginatedSignalSignupsResponse> {
     const safePage = Math.max(Math.trunc(page), 1);
     const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+    const where: Prisma.SignalSignupWhereInput = soloZona
+      ? { eventZone: true }
+      : {};
 
-    const [total, marketingOptIn, data] = await this.prisma.$transaction([
-      this.prisma.signalSignup.count(),
-      this.prisma.signalSignup.count({ where: { marketingOptIn: true } }),
-      this.prisma.signalSignup.findMany({
-        orderBy: { createdAt: 'desc' },
-        skip: (safePage - 1) * safeLimit,
-        take: safeLimit,
-        select: signupSelect,
-      }),
-    ]);
+    const [total, marketingOptIn, eventZone, data] =
+      await this.prisma.$transaction([
+        this.prisma.signalSignup.count({ where }),
+        this.prisma.signalSignup.count({
+          where: { ...where, marketingOptIn: true },
+        }),
+        this.prisma.signalSignup.count({ where: { eventZone: true } }),
+        this.prisma.signalSignup.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (safePage - 1) * safeLimit,
+          take: safeLimit,
+          select: signupSelect,
+        }),
+      ]);
 
     return {
       data,
@@ -115,6 +146,7 @@ export class SignalService {
         total,
         totalPages: Math.ceil(total / safeLimit),
         marketingOptIn,
+        eventZone,
       },
     };
   }

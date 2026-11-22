@@ -184,9 +184,9 @@ describe('SignalService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('pagina el listado y cuenta los que aceptaron novedades', async () => {
+  it('pagina el listado y cuenta los que aceptaron novedades y los de la zona', async () => {
     const rows = [{ id: '1', name: 'Ana', email: 'a@b.c' }];
-    prisma.$transaction.mockResolvedValue([41, 7, rows]);
+    prisma.$transaction.mockResolvedValue([41, 7, 3, rows]);
 
     await expect(service.findAll(2, 20)).resolves.toEqual({
       data: rows,
@@ -196,12 +196,23 @@ describe('SignalService', () => {
         total: 41,
         totalPages: 3,
         marketingOptIn: 7,
+        eventZone: 3,
       },
     });
   });
 
+  it('con soloZona lista solo a quienes están en la zona del evento', async () => {
+    prisma.$transaction.mockResolvedValue([0, 0, 0, []]);
+    await service.findAll(1, 20, true);
+
+    const args = argDe<{ where: Record<string, unknown> }>(
+      prisma.signalSignup.findMany,
+    );
+    expect(args.where).toEqual({ eventZone: true });
+  });
+
   it('nunca pide la huella de la IP para el panel', async () => {
-    prisma.$transaction.mockResolvedValue([0, 0, []]);
+    prisma.$transaction.mockResolvedValue([0, 0, 0, []]);
     await service.findAll(1, 20);
 
     const args = argDe<{ select: Record<string, boolean> }>(
@@ -211,7 +222,7 @@ describe('SignalService', () => {
   });
 
   it('acota la página y el tamaño a valores razonables', async () => {
-    prisma.$transaction.mockResolvedValue([0, 0, []]);
+    prisma.$transaction.mockResolvedValue([0, 0, 0, []]);
 
     const { meta } = await service.findAll(-3, 5_000);
 

@@ -72,8 +72,13 @@ RUN rm -rf node_modules/.pnpm/prisma@* \
 
 FROM base AS runner
 
+# Tope del heap de V8: el proceso usa ~150 MB, y sin tope Node crece hasta
+# donde le deje la máquina antes de recolectar. Con 384 MB cabe holgado en una
+# t4g.micro (1 GB) junto con Docker y el agente de SSM. Si algún día hace
+# falta más, se sube aquí o con NODE_OPTIONS en el compose de la instancia.
 ENV NODE_ENV=production \
-    PORT=4000
+    PORT=4000 \
+    NODE_OPTIONS=--max-old-space-size=384
 
 COPY --from=prod-deps --chown=node:node /app/package.json ./package.json
 COPY --from=prod-deps --chown=node:node /app/pnpm-lock.yaml ./pnpm-lock.yaml

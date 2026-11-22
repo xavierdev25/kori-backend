@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseBoolPipe,
   ParseIntPipe,
   ParseUUIDPipe,
   Query,
@@ -25,8 +26,10 @@ export class AdminSignalController {
   findSignups(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    // ?zona=1: solo quienes están en la zona del evento (Guadalajara)
+    @Query('zona', new DefaultValuePipe(false), ParseBoolPipe) zona: boolean,
   ) {
-    return this.signalService.findAll(page, limit);
+    return this.signalService.findAll(page, limit, zona);
   }
 
   @Delete(':id')

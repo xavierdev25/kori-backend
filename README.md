@@ -164,6 +164,11 @@ docker compose up --build
 
 ---
 
+## Costs (AWS)
+
+Where the money goes and how to cut it — with the real inventory and 14 days
+of metrics — is in [`docs/costos-aws.md`](docs/costos-aws.md) (Spanish).
+
 ## Endpoints
 
 ### Public
@@ -176,6 +181,57 @@ docker compose up --build
 | `POST` | `/signal` | "La señal" signup: name + email for the DICIEMBRE+ campaign emails |
 
 Rate limits: `/notes/text` 5 req/60s · `/notes/drawing` 3 req/60s · `/signal` 5 req/60s
+
+### The horse experience (home page)
+
+The landing page is now "El caballo críptico", a full-screen experience. Its
+endpoints live in `src/modules/experience/`:
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/experience/register` | — | Email + country/region/city + age confirmation. Stored in `signal_signups` (`source = 'experiencia'`). Returns `{ token, eventZone }` |
+| `POST` | `/experience/letters` | session | A public letter, anonymous and `PENDING` until reviewed. Self-harm content → `422` (not stored) |
+| `GET` | `/experience/letters` | — | The archive: latest 60 approved letters (`{ id, to, text }` only) |
+| `POST` | `/experience/letters/status` | — | Status of up to 20 letter ids (only their author knows them) |
+| `GET` | `/experience/progress` | session | "Aún aquí" game progress |
+| `POST` | `/experience/progress/run` | session | Adds a run (distance, record, stars, pages, encounters), validated and capped |
+| `POST` | `/experience/progress/path` | session | Chapters of EL CAMINO finished |
+| `POST` | `/experience/progress/memory` | session | A memory found in EL CAMINO |
+
+How it is built, and why:
+
+- **Session** = `Authorization: Bearer <token>`: 32 random bytes the browser
+  keeps. Only its HMAC (`HASH_PEPPER`) is stored, in `experience_sessions`.
+- **Registering an email that already exists is not an error** (people come
+  back from another device). It only fills location fields that were empty
+  (someone coming from "la señal"): knowing someone else's email must not let
+  you overwrite their data. The response is the same either way and
+  `eventZone` is computed from what was sent, so it can't be used to probe who
+  is registered or where.
+- **Event zone** (Guadalajara metro area) is decided here
+  (`experience/event-zone.ts`); the frontend only mirrors the list to suggest
+  cities.
+- **Letters are never linked to anyone**: `experience_letters` has no
+  relation to the signup and no IP hash (the sign-up form promises this).
+  Rejecting a letter erases its text; the row stays so its author sees "not
+  published".
+- **Game rules** (`experience/aunaqui.rules.ts`) mirror
+  `public/juego/aunaqui-config.js` in the frontend: if a song's unlock
+  condition changes, change it in both places. Each request is capped (no
+  more than 5,000 m or 5 stars per save, stars capped by distance run) and
+  unknown ids are dropped; progress updates lock the row (`FOR UPDATE`).
+
+### Admin: letter moderation
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/admin/experience/letters?status=pending\|approved\|rejected` | Paginated letters (pending: oldest first) + pending count |
+| `PATCH` | `/admin/experience/letters/:id` | `{ status: 'approved' \| 'rejected' }` |
+| `DELETE` | `/admin/experience/letters/:id` | Delete a letter |
+
+`GET /admin/signal` now also returns `source`, `country`, `region`, `city`,
+`ageConfirmed` and `eventZone`, plus `meta.eventZone`; `?zona=true` lists only
+people in the event zone.
 
 ### Auth
 
@@ -242,6 +298,11 @@ Stack traces are never exposed. `requestId` is included in every error for corre
 | `POST /notes/text` | 5 requests / 60s |
 | `POST /notes/drawing` | 3 requests / 60s |
 | `POST /signal` | 5 requests / 60s |
+| `POST /experience/register` | 5 requests / 60s |
+| `POST /experience/letters` | 4 requests / 60s |
+| `POST /experience/letters/status` | 20 requests / 60s |
+| `POST /experience/progress/run` | 90 requests / 60s |
+| `POST /experience/progress/path`, `/memory` | 30 requests / 60s |
 | `GET /notes/public` | 60 requests / 60s (global) |
 | `/admin/*` | 60 requests / 60s (global) |
 | `/health/*` | No limit |
