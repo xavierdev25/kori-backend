@@ -164,6 +164,11 @@ docker compose up --build
 
 ---
 
+## Costs (AWS)
+
+Where the money goes and how to cut it — with the real inventory and 14 days
+of metrics — is in [`docs/costos-aws.md`](docs/costos-aws.md) (Spanish).
+
 ## Endpoints
 
 ### Public

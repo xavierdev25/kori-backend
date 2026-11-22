@@ -98,6 +98,8 @@ CREATE TABLE "experience_letters" (
     "text" TEXT NOT NULL,
     "locale" TEXT NOT NULL DEFAULT 'es',
     "status" "ExperienceLetterStatus" NOT NULL DEFAULT 'PENDING',
+    -- Idempotency-Key del envío: un reenvío no duplica la carta
+    "idempotency_key" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "reviewed_at" TIMESTAMP(3),
 
@@ -115,6 +117,11 @@ CREATE TABLE "experience_letters" (
 );
 CREATE INDEX "experience_letters_status_created_at_idx"
   ON "experience_letters"("status", "created_at");
+CREATE UNIQUE INDEX "experience_letters_idempotency_key_key"
+  ON "experience_letters"("idempotency_key");
+ALTER TABLE "experience_letters"
+  ADD CONSTRAINT "experience_letters_idempotency_key_check"
+  CHECK ("idempotency_key" IS NULL OR "idempotency_key" ~ '^[0-9a-f-]{36}$');
 
 -- Misma barrera que el resto de tablas con datos personales (ver
 -- 20260810031958_enable_rls).

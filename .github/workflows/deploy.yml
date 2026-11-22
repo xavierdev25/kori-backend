@@ -98,6 +98,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Cada despliegue sube dos imagenes y nadie borraba las viejas: en noviembre
+      # de 2026 habia 44 (7 GB) cobrandose como almacenamiento de ECR, y
+      # creciendo. La politica (idempotente) deja las 15 mas recientes, que
+      # alcanzan para volver atras. Si el rol de despliegue no tiene
+      # `ecr:PutLifecyclePolicy`, se avisa y el despliegue sigue.
+      - name: Politica de limpieza de ECR
+        continue-on-error: true
+        run: |
+          aws ecr put-lifecycle-policy \
+            --repository-name "${ECR_REPOSITORY}" \
+            --lifecycle-policy-text file://.github/ecr-lifecycle-policy.json \
+            --query 'repositoryName' --output text \
+          || echo "::warning::No se pudo aplicar la politica de ECR (falta ecr:PutLifecyclePolicy en el rol de despliegue)"
+
       - name: Localizar la instancia
         id: instancia
         run: |

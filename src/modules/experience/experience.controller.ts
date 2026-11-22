@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Post,
   Req,
@@ -24,6 +26,9 @@ import {
 import { ExperienceService } from './experience.service';
 import { LettersService } from './letters.service';
 import { ProgressService } from './progress.service';
+
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * La experiencia del caballo (la portada): registro, cartas públicas y el
@@ -51,8 +56,15 @@ export class ExperienceController {
   @HttpCode(201)
   @UseGuards(ExperienceSessionGuard)
   @Throttle({ default: { limit: 4, ttl: 60_000 } })
-  createLetter(@Body() dto: CreateLetterDto) {
-    return this.letters.create(dto);
+  createLetter(
+    @Body() dto: CreateLetterDto,
+    // opcional: con ella, reenviar la misma carta no la duplica
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    if (idempotencyKey !== undefined && !UUID_V4.test(idempotencyKey)) {
+      throw new BadRequestException('Idempotency-Key debe ser un UUID v4');
+    }
+    return this.letters.create(dto, idempotencyKey?.toLowerCase());
   }
 
   /** El archivo público. Un minuto de caché: una aprobada tarda eso en salir. */

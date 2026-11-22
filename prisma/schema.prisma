@@ -196,13 +196,17 @@ model ExperienceProgress {
 /// rechazarla se borra su texto (queda el id, para que quien la escribió vea
 /// "no se publicó").
 model ExperienceLetter {
-  id         String                 @id @default(uuid())
-  toName     String                 @map("to_name")
-  text       String
-  locale     String                 @default("es")
-  status     ExperienceLetterStatus @default(PENDING)
-  createdAt  DateTime               @default(now()) @map("created_at")
-  reviewedAt DateTime?              @map("reviewed_at")
+  id             String                 @id @default(uuid())
+  toName         String                 @map("to_name")
+  text           String
+  locale         String                 @default("es")
+  status         ExperienceLetterStatus @default(PENDING)
+  /// `Idempotency-Key` del envío (UUID al azar que genera el navegador por
+  /// carta): un reenvío de la misma carta devuelve la misma fila. No dice
+  /// nada de quién la escribió.
+  idempotencyKey String?                @unique @map("idempotency_key")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  reviewedAt     DateTime?              @map("reviewed_at")
 
   @@index([status, createdAt])
   @@map("experience_letters")

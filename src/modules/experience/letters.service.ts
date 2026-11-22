@@ -38,9 +38,26 @@ const DE_ESTADO: Record<EstadoCarta, ExperienceLetterStatus> = {
 /** Cuántas cartas aprobadas se muestran en el archivo (las más nuevas). */
 const ARCHIVO_MAX = 60;
 
+/**
+ * El archivo en memoria: lo piden todos los que abren "Archivo" y solo cambia
+ * cuando alguien del equipo modera. Se guarda 30 s y se tira en cuanto se
+ * aprueba, rechaza o borra una carta (en esta instancia; con varias, las
+ * demás lo ven a lo más 30 s después: consistencia eventual aceptable para
+ * un archivo de cartas). Encima, Cloudflare puede cachearlo en el borde
+ * (`Cache-Control: public, max-age=60`).
+ */
+const ARCHIVO_TTL_MS = 30_000;
+
 @Injectable()
 export class LettersService {
+  private archivo: { hasta: number; datos: { data: CartaPublica[] } } | null =
+    null;
+
   constructor(private readonly prisma: PrismaService) {}
+
+  private olvidarArchivo() {
+    this.archivo = null;
+  }
 
   /**
    * Guarda una carta pública, pendiente de revisión. A propósito sin ningún
@@ -50,28 +67,58 @@ export class LettersService {
    * Si habla de hacerse daño no se guarda: 422, y la página le muestra a
    * quien la escribió dónde pedir ayuda.
    */
-  async create(dto: CreateLetterDto): Promise<{ id: string }> {
+  async create(
+    dto: CreateLetterDto,
+    idempotencyKey?: string,
+  ): Promise<{ id: string }> {
     if (hayRiesgo(`${dto.to} ${dto.text}`)) {
       throw new UnprocessableEntityException('carta-riesgo');
     }
-    const carta = await this.prisma.experienceLetter.create({
-      data: { toName: dto.to, text: dto.text, locale: dto.locale ?? 'es' },
-      select: { id: true },
-    });
-    return { id: carta.id };
+    try {
+      const carta = await this.prisma.experienceLetter.create({
+        data: {
+          toName: dto.to,
+          text: dto.text,
+          locale: dto.locale ?? 'es',
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        },
+        select: { id: true },
+      });
+      return { id: carta.id };
+    } catch (error) {
+      // la misma carta otra vez (se perdió la respuesta y el navegador la
+      // reenvió): se devuelve la que ya estaba, sin duplicarla
+      if (
+        idempotencyKey &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const ya = await this.prisma.experienceLetter.findUnique({
+          where: { idempotencyKey },
+          select: { id: true },
+        });
+        if (ya) return { id: ya.id };
+      }
+      throw error;
+    }
   }
 
   /** El archivo: las aprobadas, las más nuevas primero. */
   async approved(): Promise<{ data: CartaPublica[] }> {
+    if (this.archivo && this.archivo.hasta > Date.now()) {
+      return this.archivo.datos;
+    }
     const cartas = await this.prisma.experienceLetter.findMany({
       where: { status: 'APPROVED' },
       orderBy: { reviewedAt: 'desc' },
       take: ARCHIVO_MAX,
       select: { id: true, toName: true, text: true },
     });
-    return {
+    const datos = {
       data: cartas.map((c) => ({ id: c.id, to: c.toName, text: c.text })),
     };
+    this.archivo = { hasta: Date.now() + ARCHIVO_TTL_MS, datos };
+    return datos;
   }
 
   /** Cómo van unas cartas (quien la mandó guarda sus ids en su navegador). */
@@ -139,6 +186,7 @@ export class LettersService {
       status === 'approved'
         ? { status: 'APPROVED', reviewedAt: new Date() }
         : { status: 'REJECTED', reviewedAt: new Date(), text: '' };
+    this.olvidarArchivo();
     await this.prisma.experienceLetter
       .update({ where: { id }, data, select: { id: true } })
       .catch((error: unknown) => {
@@ -154,6 +202,7 @@ export class LettersService {
   }
 
   async remove(id: string): Promise<{ deleted: true; id: string }> {
+    this.olvidarArchivo();
     await this.prisma.experienceLetter
       .delete({ where: { id } })
       .catch((error: unknown) => {

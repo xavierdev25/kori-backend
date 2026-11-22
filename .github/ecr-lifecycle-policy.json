@@ -1,0 +1,25 @@
+{
+  "rules": [
+    {
+      "rulePriority": 1,
+      "description": "Imagenes sin etiqueta (migradores reemplazados): fuera al dia siguiente",
+      "selection": {
+        "tagStatus": "untagged",
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 1
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 2,
+      "description": "Se quedan las 15 mas recientes: alcanza para volver a cualquiera de los ultimos despliegues",
+      "selection": {
+        "tagStatus": "any",
+        "countType": "imageCountMoreThan",
+        "countNumber": 15
+      },
+      "action": { "type": "expire" }
+    }
+  ]
+}

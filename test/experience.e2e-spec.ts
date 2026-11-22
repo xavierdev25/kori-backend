@@ -102,6 +102,7 @@ function crearPrisma(passwordHash: string) {
     },
     experienceLetter: {
       create: jest.fn().mockResolvedValue({ id: CARTA_ID }),
+      findUnique: jest.fn().mockResolvedValue({ id: CARTA_ID }),
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
       update: jest.fn().mockResolvedValue({ id: CARTA_ID }),
@@ -234,6 +235,26 @@ describe('La experiencia del caballo (e2e)', () => {
       text: 'Te extraño.',
       locale: 'es',
     });
+  });
+
+  it('POST /experience/letters con Idempotency-Key: la guarda con ella; una clave rara es 400', async () => {
+    const clave = '8b7a5f2e-3c1d-4e6f-9a8b-7c6d5e4f3a2b';
+    await conSesion(
+      request(http)
+        .post('/experience/letters')
+        .set('Idempotency-Key', clave)
+        .send({ to: 'Ana', text: 'Te extraño.' }),
+    ).expect(201);
+    expect(
+      argDe<{ data: Record<string, unknown> }>(prisma.experienceLetter.create)
+        .data.idempotencyKey,
+    ).toBe(clave);
+    await conSesion(
+      request(http)
+        .post('/experience/letters')
+        .set('Idempotency-Key', 'no-es-uuid')
+        .send({ to: 'Ana', text: 'Te extraño.' }),
+    ).expect(400);
   });
 
   it('POST /experience/letters: hacerse daño → 422 y no se guarda', async () => {

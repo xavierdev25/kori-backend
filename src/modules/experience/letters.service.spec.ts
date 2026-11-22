@@ -12,6 +12,7 @@ function crear() {
   const prisma = {
     experienceLetter: {
       create: jest.fn().mockResolvedValue({ id: 'c1' }),
+      findUnique: jest.fn().mockResolvedValue({ id: 'c1' }),
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue({ id: 'c1' }),
       delete: jest.fn().mockResolvedValue({}),
@@ -99,5 +100,31 @@ describe('LettersService', () => {
     await expect(servicio.status(['c1'])).resolves.toEqual({
       data: [{ id: 'c1', status: 'rejected' }],
     });
+  });
+
+  it('la misma Idempotency-Key devuelve la carta que ya estaba (no duplica)', async () => {
+    const { servicio, prisma } = crear();
+    prisma.experienceLetter.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('duplicada', {
+        code: 'P2002',
+        clientVersion: 'x',
+      }),
+    );
+    await expect(
+      servicio.create({ to: 'Ana', text: 'hola' }, 'clave-1'),
+    ).resolves.toEqual({ id: 'c1' });
+    expect(prisma.experienceLetter.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { idempotencyKey: 'clave-1' } }),
+    );
+  });
+
+  it('el archivo se guarda un momento y se tira al moderar', async () => {
+    const { servicio, prisma } = crear();
+    await servicio.approved();
+    await servicio.approved();
+    expect(prisma.experienceLetter.findMany).toHaveBeenCalledTimes(1);
+    await servicio.review('c1', 'approved');
+    await servicio.approved();
+    expect(prisma.experienceLetter.findMany).toHaveBeenCalledTimes(2);
   });
 });

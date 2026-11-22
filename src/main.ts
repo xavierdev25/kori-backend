@@ -115,7 +115,8 @@ async function bootstrap() {
     // combinación credentials + comodín la rechaza el propio navegador.
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    // Idempotency-Key: las cartas públicas de la experiencia (un reenvío no duplica)
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
     exposedHeaders: ['x-request-id', 'ETag'],
   });
 
